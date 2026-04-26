@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=BlackShark V3 Control
+GenericName=Headset Control Panel
+Comment=Configure the Razer BlackShark V3 headset (EQ, sidetone, mic settings)
+Exec=blackshark-control
+Icon=blackshark-control
+Categories=AudioVideo;Audio;Mixer;Settings;HardwareSettings;
+Keywords=razer;blackshark;headset;eq;equalizer;mic;audio;
+Terminal=false
+StartupNotify=true

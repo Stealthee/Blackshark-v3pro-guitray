@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "blackshark-control"
+version = "0.1.0"
+description = "GTK4 control panel for the Razer BlackShark V3 (openrazer razerkraken driver)"
+readme = "README.md"
+license = {text = "GPL-2.0-or-later"}
+authors = [{name = "Mehmet Bayoglu"}]
+requires-python = ">=3.9"
+dependencies = ["PyGObject"]
+classifiers = [
+    "License :: OSI Approved :: GNU General Public License v2 or later (GPLv2+)",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Sound/Audio",
+    "Environment :: X11 Applications :: GTK",
+]
+
+[project.urls]
+Homepage = "https://github.com/mehmetbayoglu/blackshark-control"
+"Bug Tracker" = "https://github.com/mehmetbayoglu/blackshark-control/issues"
+
+[project.scripts]
+blackshark-control = "blackshark_control.app:main"
+
+[tool.setuptools]
+packages = ["blackshark_control"]
+
+[tool.setuptools.package-data]
+blackshark_control = []

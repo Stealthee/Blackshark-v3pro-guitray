@@ -1,0 +1,25 @@
+# Maintainer: Mehmet Bayoglu
+pkgname=blackshark-control
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="GTK4 control panel for the Razer BlackShark V3 (openrazer razerkraken)"
+arch=('any')
+url="https://github.com/mehmetbayoglu/blackshark-control"
+license=('GPL2')
+depends=('python' 'python-gobject' 'gtk4' 'openrazer-driver-dkms')
+makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel')
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+    cd "$pkgname-$pkgver"
+    python -m build --wheel --no-isolation
+}
+
+package() {
+    cd "$pkgname-$pkgver"
+    python -m installer --destdir="$pkgdir" dist/*.whl
+    install -Dm644 data/blackshark-control.desktop "$pkgdir/usr/share/applications/blackshark-control.desktop"
+    install -Dm644 data/blackshark-control.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/blackshark-control.svg"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

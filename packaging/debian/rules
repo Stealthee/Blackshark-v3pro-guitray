@@ -1,0 +1,10 @@
+#!/usr/bin/make -f
+export PYBUILD_NAME=blackshark-control
+
+%:
+	dh $@ --with python3 --buildsystem=pybuild
+
+override_dh_install:
+	dh_install
+	install -Dm644 data/blackshark-control.desktop debian/blackshark-control/usr/share/applications/blackshark-control.desktop
+	install -Dm644 data/blackshark-control.svg debian/blackshark-control/usr/share/icons/hicolor/scalable/apps/blackshark-control.svg

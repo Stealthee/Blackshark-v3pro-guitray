@@ -366,20 +366,26 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         sysfs_write('thx_spatial_audio', '1' if self._thx_on else '0')
 
     def _on_preset(self, btn, name):
+        # Update button highlight first and let GTK paint it before doing
+        # anything else — the slider-load + sysfs-write takes long enough
+        # that without the deferral the previous preset's green styling
+        # appeared to linger for ~1s before the new selection lit up.
         for n, b in self._preset_btns.items():
             b.remove_css_class('active')
         btn.add_css_class('active')
         self._eq_target_profile = PRESET_IDX[name]
         self._update_profile_selector()
-        # load from saved custom values for this slot
-        vals = self._eq_custom.get(self._eq_target_profile, list(EQ_FACTORY[self._eq_target_profile]))
-        self._load_sliders(vals)
-        # Defer the write so the UI redraws first — _apply_eq blocks ~750ms
-        # while the driver runs its 5-step HID sequence. Reuse the slider
-        # debounce so rapid preset clicks coalesce into one write.
-        if self._eq_apply_timer:
-            GLib.source_remove(self._eq_apply_timer)
-        self._eq_apply_timer = GLib.timeout_add(50, self._debounced_apply)
+
+        def _finish_preset_change():
+            vals = self._eq_custom.get(self._eq_target_profile,
+                                       list(EQ_FACTORY[self._eq_target_profile]))
+            self._load_sliders(vals)
+            if self._eq_apply_timer:
+                GLib.source_remove(self._eq_apply_timer)
+            self._eq_apply_timer = GLib.timeout_add(50, self._debounced_apply)
+            return False
+
+        GLib.idle_add(_finish_preset_change)
 
     def _load_sliders(self, vals):
         self._ignore_slider = True
@@ -458,16 +464,29 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         if profile_idx is None:
             profile_idx = self._eq_target_profile
         val_str = f"{profile_idx} " + ' '.join(str(v) for v in self._eq_values)
-        ok, err = sysfs_write('headphone_eq', val_str)
+        snapshot_vals = list(self._eq_values)
         profile_names = ['Default', 'Game', 'Movie', 'Music', 'Esports']
         pname = profile_names[profile_idx]
-        if ok:
-            self._eq_custom[profile_idx] = list(self._eq_values)
-            save_eq_config(self._eq_custom)
-            status = f'→ Written to slot {profile_idx} ({pname})'
-        else:
-            status = f'→ Write failed: {err}'
-        self._update_hex_preview(status=status)
+
+        # Run the sysfs write on a worker thread — the driver's 5-step HID
+        # sequence blocks the caller for ~750ms (4 inter-write msleep(150)).
+        # Doing it on the GTK main thread froze paint, which made the new
+        # preset's green styling appear ~1s late.
+        def _worker():
+            ok, err = sysfs_write('headphone_eq', val_str)
+            def _on_done():
+                if ok:
+                    self._eq_custom[profile_idx] = snapshot_vals
+                    save_eq_config(self._eq_custom)
+                    status = f'→ Written to slot {profile_idx} ({pname})'
+                else:
+                    status = f'→ Write failed: {err}'
+                self._update_hex_preview(status=status)
+                return False
+            GLib.idle_add(_on_done)
+
+        import threading
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _on_eq_apply(self, btn):
         self._apply_eq()

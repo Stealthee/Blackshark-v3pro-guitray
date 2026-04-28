@@ -374,7 +374,12 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         # load from saved custom values for this slot
         vals = self._eq_custom.get(self._eq_target_profile, list(EQ_FACTORY[self._eq_target_profile]))
         self._load_sliders(vals)
-        self._apply_eq(profile_idx=self._eq_target_profile)
+        # Defer the write so the UI redraws first — _apply_eq blocks ~750ms
+        # while the driver runs its 5-step HID sequence. Reuse the slider
+        # debounce so rapid preset clicks coalesce into one write.
+        if self._eq_apply_timer:
+            GLib.source_remove(self._eq_apply_timer)
+        self._eq_apply_timer = GLib.timeout_add(50, self._debounced_apply)
 
     def _load_sliders(self, vals):
         self._ignore_slider = True
@@ -387,7 +392,9 @@ class BlackSharkControl(Gtk.ApplicationWindow):
     def _on_reset_to_factory(self, btn):
         name = [n for n, i in PRESET_IDX.items() if i == self._eq_target_profile][0]
         self._load_sliders(list(EQ_FACTORY[self._eq_target_profile]))
-        self._apply_eq()
+        if self._eq_apply_timer:
+            GLib.source_remove(self._eq_apply_timer)
+        self._eq_apply_timer = GLib.timeout_add(50, self._debounced_apply)
 
     def _on_eq_slider(self, sl, idx):
         if self._ignore_slider:

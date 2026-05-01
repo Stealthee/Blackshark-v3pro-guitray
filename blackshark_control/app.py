@@ -527,7 +527,7 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         gc_lbl.add_css_class('section-label')
         gc_lbl.set_halign(Gtk.Align.START)
         gc_card.append(gc_lbl)
-        gc_desc = Gtk.Label(label='0 = full chat · 10 = center · 20 = full game')
+        gc_desc = Gtk.Label(label='0 = full game · 10 = center · 20 = full chat')
         gc_desc.set_halign(Gtk.Align.START)
         gc_desc.set_xalign(0)
         gc_card.append(gc_desc)

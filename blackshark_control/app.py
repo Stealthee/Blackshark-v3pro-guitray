@@ -520,18 +520,49 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         ull_card.append(self._ull_btn)
         outer.append(ull_card)
 
-        # note about unknown commands
-        note_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        note_card.add_css_class('card')
-        note_lbl = Gtk.Label(label='AUDIO ENHANCEMENT')
-        note_lbl.add_css_class('section-label')
-        note_lbl.set_halign(Gtk.Align.START)
-        note_card.append(note_lbl)
-        note_desc = Gtk.Label(label='Sound Normalization / Bass Boost / Voice Clarity\nnot yet decoded from captures.')
-        note_desc.set_halign(Gtk.Align.START)
-        note_desc.set_xalign(0)
-        note_card.append(note_desc)
-        outer.append(note_card)
+        # Game/Chat balance
+        gc_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        gc_card.add_css_class('card')
+        gc_lbl = Gtk.Label(label='GAME / CHAT BALANCE')
+        gc_lbl.add_css_class('section-label')
+        gc_lbl.set_halign(Gtk.Align.START)
+        gc_card.append(gc_lbl)
+        gc_desc = Gtk.Label(label='0 = full chat · 10 = center · 20 = full game')
+        gc_desc.set_halign(Gtk.Align.START)
+        gc_desc.set_xalign(0)
+        gc_card.append(gc_desc)
+        gc_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self._gc_slider = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 20, 1)
+        self._gc_slider.set_value(10)
+        self._gc_slider.set_hexpand(True)
+        self._gc_slider.set_draw_value(True)
+        self._gc_slider.connect('value-changed', self._on_game_chat_balance)
+        gc_row.append(self._gc_slider)
+        gc_card.append(gc_row)
+        outer.append(gc_card)
+
+        # In-call audio mix
+        ic_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        ic_card.add_css_class('card')
+        ic_lbl = Gtk.Label(label='IN-CALL AUDIO MIX')
+        ic_lbl.add_css_class('section-label')
+        ic_lbl.set_halign(Gtk.Align.START)
+        ic_card.append(ic_lbl)
+        ic_desc = Gtk.Label(label='What happens to 2.4 GHz game audio when a Bluetooth call comes in.')
+        ic_desc.set_halign(Gtk.Align.START)
+        ic_desc.set_xalign(0)
+        ic_card.append(ic_desc)
+        ic_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self._ic_btns = {}
+        for mode_val, mode_name in [(0, 'Combine 2.4 + BT'), (1, 'Lower 2.4'), (2, 'Mute 2.4')]:
+            b = Gtk.Button(label=mode_name)
+            b.add_css_class('pwr-btn')
+            b.connect('clicked', self._on_in_call_mix, mode_val)
+            ic_row.append(b)
+            self._ic_btns[mode_val] = b
+        self._ic_btns[0].add_css_class('active')
+        ic_card.append(ic_row)
+        outer.append(ic_card)
 
         return outer
 
@@ -546,6 +577,16 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             btn.remove_css_class('toggle-on')
             btn.add_css_class('toggle-off')
         sysfs_write('ultra_low_latency', '1' if self._ull_on else '0')
+
+    def _on_game_chat_balance(self, sl):
+        val = int(round(sl.get_value()))
+        sysfs_write('game_chat_balance', str(val))
+
+    def _on_in_call_mix(self, btn, mode):
+        for b in self._ic_btns.values():
+            b.remove_css_class('active')
+        btn.add_css_class('active')
+        sysfs_write('in_call_audio_mix', str(mode))
 
     # ── Mic tab ─────────────────────────────────────────────────────────────
 
@@ -671,7 +712,38 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         fn_card.append(fn_row)
         outer.append(fn_card)
 
+        # Audio prompts toggle
+        ap_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        ap_card.add_css_class('card')
+        ap_lbl = Gtk.Label(label='AUDIO PROMPTS')
+        ap_lbl.add_css_class('section-label')
+        ap_lbl.set_halign(Gtk.Align.START)
+        ap_card.append(ap_lbl)
+        ap_desc = Gtk.Label(label='Voice prompts for mic mute/unmute events.')
+        ap_desc.set_halign(Gtk.Align.START)
+        ap_desc.set_xalign(0)
+        ap_card.append(ap_desc)
+        self._ap_btn = Gtk.Button(label='ON')
+        self._ap_btn.add_css_class('toggle-on')
+        self._ap_btn.set_halign(Gtk.Align.START)
+        self._ap_on = True
+        self._ap_btn.connect('clicked', self._on_audio_prompts)
+        ap_card.append(self._ap_btn)
+        outer.append(ap_card)
+
         return outer
+
+    def _on_audio_prompts(self, btn):
+        self._ap_on = not self._ap_on
+        if self._ap_on:
+            btn.set_label('ON')
+            btn.remove_css_class('toggle-off')
+            btn.add_css_class('toggle-on')
+        else:
+            btn.set_label('OFF')
+            btn.remove_css_class('toggle-on')
+            btn.add_css_class('toggle-off')
+        sysfs_write('audio_prompts', '1' if self._ap_on else '0')
 
     def _on_sidetone(self, sl):
         val = int(round(sl.get_value()))

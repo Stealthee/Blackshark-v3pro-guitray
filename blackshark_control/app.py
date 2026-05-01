@@ -7,7 +7,62 @@ from gi.repository import Gtk, GLib, Gdk, Pango
 import glob, os, subprocess, json
 
 SYSFS_DIR = '/sys/bus/hid/drivers/razerkraken'
-PIDS = ('057A', '0579')   # wireless dongle, wired
+PIDS = ('0577', '057A', '0579')   # V3 Pro, V3 wireless dongle, V3 wired
+
+# Per-PID feature/capability map. Each entry is the sysfs attr name (or None).
+# A feature with attr=None is hidden in the GUI for that device.
+DEVICE_CAPS = {
+    # V3 wireless dongle (full V3 feature set)
+    '057A': {
+        'name': 'BlackShark V3 (2.4 GHz)',
+        'thx': 'thx_spatial_audio',
+        'ull': 'ultra_low_latency',
+        'sidetone': 'sidetone',
+        'eq': 'headphone_eq',         # accepts "<profile> b1..b10"
+        'eq_mode': 'bands',           # full per-band control
+        'power_save': 'wireless_power_save',
+        'battery': None,
+        'charging': None,
+        'anc': None,
+        'mic_eq': 'mic_eq',
+        'mic_eq_preset': 'mic_eq_preset',
+        'audio_fn_button': 'audio_function_button',
+        'mic_volume_uac2': True,
+        'game_chat': 'game_chat_balance',
+        'in_call_mix': 'in_call_audio_mix',
+        'audio_prompts': 'audio_prompts',
+    },
+    # V3 wired
+    '0579': None,   # filled below — same as 057A minus ull/power_save/battery
+    # V3 Pro
+    '0577': {
+        'name': 'BlackShark V3 Pro',
+        'thx': 'v3pro_thx_spatial_audio',
+        'ull': 'v3pro_ultra_low_latency',
+        'sidetone': 'v3pro_sidetone',
+        'eq': 'v3pro_headphone_eq',   # accepts single byte = slot index 0..8
+        'eq_mode': 'slot-only',       # only switch between firmware slots
+        'power_save': 'v3pro_power_save',
+        'battery': 'v3pro_battery_level',
+        'charging': 'v3pro_charging',
+        'anc': 'v3pro_anc',
+        'mic_eq': None,               # not yet exposed in V3 Pro driver path
+        'mic_eq_preset': None,
+        'audio_fn_button': None,
+        'mic_volume_uac2': True,
+        'game_chat': 'game_chat_balance',
+        'in_call_mix': 'in_call_audio_mix',
+        'audio_prompts': 'audio_prompts',
+    },
+}
+# V3 wired: same as wireless but no power-save / ULL (those need the dongle's
+# wireless link). Battery is irrelevant when wired.
+DEVICE_CAPS['0579'] = dict(DEVICE_CAPS['057A'])
+DEVICE_CAPS['0579'].update({
+    'name': 'BlackShark V3 (Wired)',
+    'ull': None,
+    'power_save': None,
+})
 
 EQ_FREQS = ['31Hz','63Hz','125Hz','250Hz','500Hz','1kHz','2kHz','4kHz','8kHz','16kHz']
 
@@ -100,13 +155,63 @@ scale.vertical trough { min-width: 4px; min-height: 4px; }
 """
 
 def sysfs_path():
+    """Return (path, pid) for the first connected BlackShark variant."""
     for pid in PIDS:
         paths = glob.glob(f'{SYSFS_DIR}/0003:1532:{pid}.*')
         if paths:
             return paths[0], pid
     return None, None
 
+
+class Device:
+    """Capability-aware wrapper around the kernel sysfs interface.
+
+    Hides per-device differences (V3 vs V3 Pro use different attribute names
+    for the same logical feature). Use `dev.has(feature)` to gate UI, and
+    `dev.write(feature, val)` / `dev.read(feature)` to talk to it.
+    """
+    def __init__(self, path, pid):
+        self.path = path
+        self.pid = pid
+        self.caps = DEVICE_CAPS[pid]
+        self.name = self.caps['name']
+        self.is_v3_pro = (pid == '0577')
+
+    @classmethod
+    def detect(cls):
+        path, pid = sysfs_path()
+        return cls(path, pid) if path else None
+
+    def has(self, feature):
+        return self.caps.get(feature) is not None
+
+    def attr(self, feature):
+        return self.caps.get(feature)
+
+    def write(self, feature, value):
+        attr = self.attr(feature)
+        if attr is None:
+            return False, f'feature {feature!r} unsupported on {self.name}'
+        try:
+            with open(f'{self.path}/{attr}', 'w') as f:
+                f.write(str(value))
+            return True, None
+        except Exception as e:
+            return False, str(e)
+
+    def read(self, feature):
+        attr = self.attr(feature)
+        if attr is None:
+            return None
+        try:
+            with open(f'{self.path}/{attr}') as f:
+                return f.read().strip()
+        except Exception:
+            return None
+
+
 def sysfs_read(attr):
+    """Legacy direct-attr read (used by code that already knows the attr name)."""
     path, _ = sysfs_path()
     if not path:
         return None
@@ -117,6 +222,7 @@ def sysfs_read(attr):
         return None
 
 def sysfs_write(attr, value):
+    """Legacy direct-attr write."""
     path, _ = sysfs_path()
     if not path:
         return False, 'device not found'
@@ -130,9 +236,11 @@ def sysfs_write(attr, value):
 
 class BlackSharkControl(Gtk.ApplicationWindow):
     def __init__(self, app):
-        super().__init__(application=app, title='BlackShark V3 Control')
+        super().__init__(application=app, title='BlackShark Control')
         self.set_default_size(900, 620)
         self.set_resizable(False)
+
+        self._device = Device.detect()
 
         self._eq_sliders = []
         self._eq_values = [0] * 10
@@ -141,13 +249,15 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         self._eq_custom = load_eq_config()
         self._mic_eq_custom = load_mic_eq_config()
         self._mic_target_idx = 0
-        self._connected_pid = None
+        self._connected_pid = self._device.pid if self._device else None
         self._mic_vol_slider = None
         self._pwr_timeout = 30
         self._thx_on = False
         self._ull_on = True
         self._pwr_on = True
         self._ignore_slider = False
+        self._anc_mode = 0
+        self._anc_level = 1
 
         # status refresh
         GLib.timeout_add(2000, self._refresh_status)
@@ -161,9 +271,22 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         nb.append_page(self._build_mic_tab(), Gtk.Label(label='MIC'))
         nb.append_page(self._build_power_tab(), Gtk.Label(label='POWER'))
 
+        self.set_title(f'{self._device.name} Control' if self._device
+                       else 'BlackShark Control')
         self._refresh_status()
         # load Default preset into sliders on startup
         GLib.idle_add(self._load_default_preset)
+
+    def _has(self, feature):
+        return self._device is not None and self._device.has(feature)
+
+    def _write(self, feature, value):
+        if not self._device:
+            return False, 'device not found'
+        return self._device.write(feature, value)
+
+    def _read(self, feature):
+        return self._device.read(feature) if self._device else None
 
     def _load_default_preset(self):
         self._on_preset(self._preset_btns['Default'], 'Default')
@@ -179,13 +302,30 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         return box
 
     def _refresh_status(self):
-        path, pid = sysfs_path()
-        if path:
-            mode = '2.4GHz' if pid == '057A' else 'Wired'
-            self._status_label.set_text(f'Connected ({mode}) · {pid} · {os.path.basename(path)}')
+        # Re-detect on each tick — handles unplug/replug.
+        new_dev = Device.detect()
+        if new_dev and (self._device is None or new_dev.pid != self._device.pid
+                        or new_dev.path != self._device.path):
+            self._device = new_dev
+        elif new_dev is None:
+            self._device = None
+
+        if self._device:
+            extras = ''
+            if self._device.has('battery'):
+                bl = self._read('battery')
+                ch = self._read('charging')
+                if bl and bl != '-1':
+                    extras = f' · {bl}%'
+                    if ch == '1':
+                        extras += ' (charging)'
+            self._status_label.set_text(
+                f'{self._device.name} · {self._device.pid} · '
+                f'{os.path.basename(self._device.path)}{extras}'
+            )
             self._status_label.remove_css_class('status-err')
             self._status_label.add_css_class('status-ok')
-            self._connected_pid = pid
+            self._connected_pid = self._device.pid
         else:
             self._status_label.set_text('Device not found — plug in headset/dongle')
             self._status_label.remove_css_class('status-ok')
@@ -363,7 +503,7 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             btn.set_label('STEREO')
             btn.remove_css_class('toggle-on')
             btn.add_css_class('toggle-off')
-        sysfs_write('thx_spatial_audio', '1' if self._thx_on else '0')
+        self._write('thx', '1' if self._thx_on else '0')
 
     def _on_preset(self, btn, name):
         # Update button highlight first and let GTK paint it before doing
@@ -472,8 +612,11 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         # sequence blocks the caller for ~750ms (4 inter-write msleep(150)).
         # Doing it on the GTK main thread froze paint, which made the new
         # preset's green styling appear ~1s late.
+        # On V3 Pro the EQ sysfs only takes a slot index — sliders are advisory.
+        write_val = (str(profile_idx) if self._device and self._device.caps.get('eq_mode') == 'slot-only'
+                     else val_str)
         def _worker():
-            ok, err = sysfs_write('headphone_eq', val_str)
+            ok, err = self._write('eq', write_val)
             def _on_done():
                 if ok:
                     self._eq_custom[profile_idx] = snapshot_vals
@@ -499,26 +642,64 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         outer.set_margin_start(20); outer.set_margin_end(20)
         outer.add_css_class('main-box')
 
-        # ULL
-        ull_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        ull_card.add_css_class('card')
-        ull_lbl = Gtk.Label(label='ULTRA-LOW LATENCY')
-        ull_lbl.add_css_class('section-label')
-        ull_lbl.set_halign(Gtk.Align.START)
-        ull_card.append(ull_lbl)
+        # ULL — wireless only
+        if self._has('ull'):
+            ull_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+            ull_card.add_css_class('card')
+            ull_lbl = Gtk.Label(label='ULTRA-LOW LATENCY')
+            ull_lbl.add_css_class('section-label')
+            ull_lbl.set_halign(Gtk.Align.START)
+            ull_card.append(ull_lbl)
 
-        ull_desc = Gtk.Label(label='High-speed wireless audio via Razer HyperSpeed Gen-2 dongle.\nEnabled: ~10ms latency.  Disabled: extended range & battery life.')
-        ull_desc.set_wrap(True)
-        ull_desc.set_halign(Gtk.Align.START)
-        ull_desc.set_xalign(0)
-        ull_card.append(ull_desc)
+            ull_desc = Gtk.Label(label='High-speed wireless audio via Razer HyperSpeed Gen-2 dongle.\nEnabled: ~10ms latency.  Disabled: extended range & battery life.')
+            ull_desc.set_wrap(True)
+            ull_desc.set_halign(Gtk.Align.START)
+            ull_desc.set_xalign(0)
+            ull_card.append(ull_desc)
 
-        self._ull_btn = Gtk.Button(label='ON')
-        self._ull_btn.add_css_class('toggle-on')
-        self._ull_btn.set_halign(Gtk.Align.START)
-        self._ull_btn.connect('clicked', self._on_ull_toggle)
-        ull_card.append(self._ull_btn)
-        outer.append(ull_card)
+            self._ull_btn = Gtk.Button(label='ON')
+            self._ull_btn.add_css_class('toggle-on')
+            self._ull_btn.set_halign(Gtk.Align.START)
+            self._ull_btn.connect('clicked', self._on_ull_toggle)
+            ull_card.append(self._ull_btn)
+            outer.append(ull_card)
+
+        # ANC + Ambient — V3 Pro only
+        if self._has('anc'):
+            anc_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+            anc_card.add_css_class('card')
+            anc_lbl = Gtk.Label(label='ACTIVE NOISE CANCELLATION')
+            anc_lbl.add_css_class('section-label')
+            anc_lbl.set_halign(Gtk.Align.START)
+            anc_card.append(anc_lbl)
+
+            anc_mode_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            self._anc_mode_btns = {}
+            for mode_val, mode_name in [(0, 'Off'), (1, 'ANC'), (2, 'Ambient')]:
+                b = Gtk.Button(label=mode_name)
+                b.add_css_class('pwr-btn')
+                if mode_val == 0:
+                    b.add_css_class('active')
+                b.connect('clicked', self._on_anc_mode, mode_val)
+                anc_mode_row.append(b)
+                self._anc_mode_btns[mode_val] = b
+            anc_card.append(anc_mode_row)
+
+            anc_lvl_lbl = Gtk.Label(label='ANC level (1–4, ANC mode only)')
+            anc_lvl_lbl.set_halign(Gtk.Align.START); anc_lvl_lbl.set_xalign(0)
+            anc_card.append(anc_lvl_lbl)
+            anc_lvl_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            self._anc_lvl_btns = {}
+            for lvl in (1, 2, 3, 4):
+                b = Gtk.Button(label=str(lvl))
+                b.add_css_class('pwr-btn')
+                if lvl == 1:
+                    b.add_css_class('active')
+                b.connect('clicked', self._on_anc_level, lvl)
+                anc_lvl_row.append(b)
+                self._anc_lvl_btns[lvl] = b
+            anc_card.append(anc_lvl_row)
+            outer.append(anc_card)
 
         # Game/Chat balance
         gc_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
@@ -576,17 +757,33 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             btn.set_label('OFF')
             btn.remove_css_class('toggle-on')
             btn.add_css_class('toggle-off')
-        sysfs_write('ultra_low_latency', '1' if self._ull_on else '0')
+        self._write('ull', '1' if self._ull_on else '0')
 
     def _on_game_chat_balance(self, sl):
         val = int(round(sl.get_value()))
-        sysfs_write('game_chat_balance', str(val))
+        self._write('game_chat', str(val))
 
     def _on_in_call_mix(self, btn, mode):
         for b in self._ic_btns.values():
             b.remove_css_class('active')
         btn.add_css_class('active')
-        sysfs_write('in_call_audio_mix', str(mode))
+        self._write('in_call_mix', str(mode))
+
+    def _on_anc_mode(self, btn, mode):
+        for b in self._anc_mode_btns.values():
+            b.remove_css_class('active')
+        btn.add_css_class('active')
+        self._anc_mode = mode
+        self._write('anc', f'{mode} {self._anc_level}')
+
+    def _on_anc_level(self, btn, lvl):
+        for b in self._anc_lvl_btns.values():
+            b.remove_css_class('active')
+        btn.add_css_class('active')
+        self._anc_level = lvl
+        # Only re-write if in ANC mode (level is irrelevant otherwise)
+        if self._anc_mode == 1:
+            self._write('anc', f'1 {lvl}')
 
     # ── Mic tab ─────────────────────────────────────────────────────────────
 
@@ -629,88 +826,89 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         st_card.append(st_row)
         outer.append(st_card)
 
-        # Mic EQ presets
-        mp_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        mp_card.add_css_class('card')
-        mp_lbl = Gtk.Label(label='MIC EQ PRESET')
-        mp_lbl.add_css_class('section-label')
-        mp_lbl.set_halign(Gtk.Align.START)
-        mp_card.append(mp_lbl)
-        mp_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        # Mic EQ presets — V3 only (V3 Pro driver doesn't expose mic EQ yet)
         self._mic_preset_btns = {}
-        for i, name in enumerate(MIC_EQ_PRESETS):
-            b = Gtk.Button(label=name)
-            b.add_css_class('pwr-btn')
-            if i == 0:
-                b.add_css_class('active')
-            b.connect('clicked', self._on_mic_preset, i)
-            mp_row.append(b)
-            self._mic_preset_btns[i] = b
-        mp_card.append(mp_row)
-        outer.append(mp_card)
-
-        # Mic EQ 10-band sliders
-        meq_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        meq_card.add_css_class('card')
-        meq_lbl = Gtk.Label(label='MIC EQUALIZER  (-6 dB … +6 dB)')
-        meq_lbl.add_css_class('section-label')
-        meq_lbl.set_halign(Gtk.Align.START)
-        meq_card.append(meq_lbl)
-
-        meq_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        meq_row.set_hexpand(True)
         self._mic_eq_sliders = []
         self._mic_eq_val_labels = []
         self._mic_eq_values = [0] * 10
         self._mic_ignore_slider = False
         self._mic_eq_apply_timer = None
-        for i, freq in enumerate(EQ_FREQS):
-            col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-            col.set_hexpand(True)
-            val_lbl = Gtk.Label(label='0')
-            val_lbl.add_css_class('value-label')
-            adj = Gtk.Adjustment(value=0, lower=-6, upper=6, step_increment=1, page_increment=1)
-            sl = Gtk.Scale(orientation=Gtk.Orientation.VERTICAL, adjustment=adj)
-            sl.set_inverted(True); sl.set_draw_value(False)
-            sl.set_size_request(40, 100)
-            sl.add_mark(0, Gtk.PositionType.RIGHT, None)
-            sl.connect('value-changed', self._on_mic_eq_slider, i)
-            freq_lbl = Gtk.Label(label=freq); freq_lbl.add_css_class('freq-label')
-            col.append(val_lbl); col.append(sl); col.append(freq_lbl)
-            meq_row.append(col)
-            self._mic_eq_sliders.append(sl)
-            self._mic_eq_val_labels.append(val_lbl)
-        meq_card.append(meq_row)
+        if self._has('mic_eq_preset'):
+            mp_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+            mp_card.add_css_class('card')
+            mp_lbl = Gtk.Label(label='MIC EQ PRESET')
+            mp_lbl.add_css_class('section-label')
+            mp_lbl.set_halign(Gtk.Align.START)
+            mp_card.append(mp_lbl)
+            mp_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            for i, name in enumerate(MIC_EQ_PRESETS):
+                b = Gtk.Button(label=name)
+                b.add_css_class('pwr-btn')
+                if i == 0:
+                    b.add_css_class('active')
+                b.connect('clicked', self._on_mic_preset, i)
+                mp_row.append(b)
+                self._mic_preset_btns[i] = b
+            mp_card.append(mp_row)
+            outer.append(mp_card)
 
-        # Reset to default values for mic EQ (mirrors headphone EQ behavior)
-        meq_reset_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        meq_reset_row.set_halign(Gtk.Align.CENTER)
-        meq_reset_row.set_margin_top(4)
-        meq_reset_btn = Gtk.Button(label='Reset to Default Values')
-        meq_reset_btn.add_css_class('preset-btn')
-        meq_reset_btn.connect('clicked', self._on_mic_reset_to_factory)
-        meq_reset_row.append(meq_reset_btn)
-        meq_card.append(meq_reset_row)
+        # Mic EQ 10-band sliders — V3 only
+        if self._has('mic_eq'):
+            meq_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            meq_card.add_css_class('card')
+            meq_lbl = Gtk.Label(label='MIC EQUALIZER  (-6 dB … +6 dB)')
+            meq_lbl.add_css_class('section-label')
+            meq_lbl.set_halign(Gtk.Align.START)
+            meq_card.append(meq_lbl)
 
-        outer.append(meq_card)
+            meq_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            meq_row.set_hexpand(True)
+            for i, freq in enumerate(EQ_FREQS):
+                col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+                col.set_hexpand(True)
+                val_lbl = Gtk.Label(label='0')
+                val_lbl.add_css_class('value-label')
+                adj = Gtk.Adjustment(value=0, lower=-6, upper=6, step_increment=1, page_increment=1)
+                sl = Gtk.Scale(orientation=Gtk.Orientation.VERTICAL, adjustment=adj)
+                sl.set_inverted(True); sl.set_draw_value(False)
+                sl.set_size_request(40, 100)
+                sl.add_mark(0, Gtk.PositionType.RIGHT, None)
+                sl.connect('value-changed', self._on_mic_eq_slider, i)
+                freq_lbl = Gtk.Label(label=freq); freq_lbl.add_css_class('freq-label')
+                col.append(val_lbl); col.append(sl); col.append(freq_lbl)
+                meq_row.append(col)
+                self._mic_eq_sliders.append(sl)
+                self._mic_eq_val_labels.append(val_lbl)
+            meq_card.append(meq_row)
 
-        # Audio function button mode (footsteps vs sidetone save)
-        fn_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        fn_card.add_css_class('card')
-        fn_lbl = Gtk.Label(label='AUDIO FUNCTION BUTTON')
-        fn_lbl.add_css_class('section-label')
-        fn_lbl.set_halign(Gtk.Align.START)
-        fn_card.append(fn_lbl)
-        fn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            meq_reset_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            meq_reset_row.set_halign(Gtk.Align.CENTER)
+            meq_reset_row.set_margin_top(4)
+            meq_reset_btn = Gtk.Button(label='Reset to Default Values')
+            meq_reset_btn.add_css_class('preset-btn')
+            meq_reset_btn.connect('clicked', self._on_mic_reset_to_factory)
+            meq_reset_row.append(meq_reset_btn)
+            meq_card.append(meq_reset_row)
+            outer.append(meq_card)
+
+        # Audio function button mode — V3 only
         self._fn_btns = {}
-        for mode_val, mode_name in [(1, 'Sidetone Save'), (2, 'Footsteps Scaling')]:
-            b = Gtk.Button(label=mode_name)
-            b.add_css_class('pwr-btn')
-            b.connect('clicked', self._on_fn_button, mode_val)
-            fn_row.append(b)
-            self._fn_btns[mode_val] = b
-        fn_card.append(fn_row)
-        outer.append(fn_card)
+        if self._has('audio_fn_button'):
+            fn_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+            fn_card.add_css_class('card')
+            fn_lbl = Gtk.Label(label='AUDIO FUNCTION BUTTON')
+            fn_lbl.add_css_class('section-label')
+            fn_lbl.set_halign(Gtk.Align.START)
+            fn_card.append(fn_lbl)
+            fn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            for mode_val, mode_name in [(1, 'Sidetone Save'), (2, 'Footsteps Scaling')]:
+                b = Gtk.Button(label=mode_name)
+                b.add_css_class('pwr-btn')
+                b.connect('clicked', self._on_fn_button, mode_val)
+                fn_row.append(b)
+                self._fn_btns[mode_val] = b
+            fn_card.append(fn_row)
+            outer.append(fn_card)
 
         # Audio prompts toggle
         ap_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
@@ -743,11 +941,11 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             btn.set_label('OFF')
             btn.remove_css_class('toggle-on')
             btn.add_css_class('toggle-off')
-        sysfs_write('audio_prompts', '1' if self._ap_on else '0')
+        self._write('audio_prompts', '1' if self._ap_on else '0')
 
     def _on_sidetone(self, sl):
         val = int(round(sl.get_value()))
-        sysfs_write('sidetone', str(val))
+        self._write('sidetone', str(val))
 
     def _load_mic_sliders(self, vals):
         self._mic_ignore_slider = True
@@ -760,11 +958,11 @@ class BlackSharkControl(Gtk.ApplicationWindow):
     def _apply_mic_eq(self, idx=None):
         if idx is None:
             idx = self._mic_target_idx
-        ok, err = sysfs_write('mic_eq', ' '.join(str(v) for v in self._mic_eq_values))
+        ok, err = self._write('mic_eq', ' '.join(str(v) for v in self._mic_eq_values))
         if ok:
             self._mic_eq_custom[idx] = list(self._mic_eq_values)
             save_mic_eq_config(self._mic_eq_custom)
-        sysfs_write('mic_eq_preset', str(idx))
+        self._write('mic_eq_preset', str(idx))
 
     def _on_mic_preset(self, btn, idx):
         for b in self._mic_preset_btns.values():
@@ -799,7 +997,7 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         for b in self._fn_btns.values():
             b.remove_css_class('active')
         btn.add_css_class('active')
-        sysfs_write('audio_function_button', str(mode))
+        self._write('audio_fn_button', str(mode))
 
     # ── Power tab ───────────────────────────────────────────────────────────
 
@@ -812,42 +1010,48 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
         outer.append(hbox)
 
-        # left: wireless power save
+        # left: wireless power save (only on wireless variants)
         left = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         hbox.append(left)
 
-        pwr_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        pwr_card.add_css_class('card')
-        pwr_card.set_size_request(340, -1)
-
-        pwr_lbl = Gtk.Label(label='WIRELESS POWER SAVING')
-        pwr_lbl.add_css_class('section-label')
-        pwr_lbl.set_halign(Gtk.Align.START)
-        pwr_card.append(pwr_lbl)
-
-        self._pwr_toggle_btn = Gtk.Button(label='ON')
-        self._pwr_toggle_btn.add_css_class('toggle-on')
-        self._pwr_toggle_btn.set_halign(Gtk.Align.START)
-        self._pwr_toggle_btn.connect('clicked', self._on_pwr_toggle)
-        pwr_card.append(self._pwr_toggle_btn)
-
-        pwr_desc = Gtk.Label(label='Device will turn off after (mins) of inactivity:')
-        pwr_desc.set_halign(Gtk.Align.START)
-        pwr_desc.set_xalign(0)
-        pwr_card.append(pwr_desc)
-
-        timeout_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         self._timeout_btns = {}
-        for t in (15, 30, 45, 60):
-            btn = Gtk.Button(label=str(t))
-            btn.add_css_class('pwr-btn')
-            if t == 30:
-                btn.add_css_class('active')
-            btn.connect('clicked', self._on_timeout, t)
-            timeout_row.append(btn)
-            self._timeout_btns[t] = btn
-        pwr_card.append(timeout_row)
-        left.append(pwr_card)
+        if self._has('power_save'):
+            pwr_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+            pwr_card.add_css_class('card')
+            pwr_card.set_size_request(340, -1)
+
+            pwr_lbl = Gtk.Label(label='WIRELESS POWER SAVING')
+            pwr_lbl.add_css_class('section-label')
+            pwr_lbl.set_halign(Gtk.Align.START)
+            pwr_card.append(pwr_lbl)
+
+            self._pwr_toggle_btn = Gtk.Button(label='ON')
+            self._pwr_toggle_btn.add_css_class('toggle-on')
+            self._pwr_toggle_btn.set_halign(Gtk.Align.START)
+            self._pwr_toggle_btn.connect('clicked', self._on_pwr_toggle)
+            pwr_card.append(self._pwr_toggle_btn)
+
+            pwr_desc = Gtk.Label(label='Device will turn off after (mins) of inactivity:')
+            pwr_desc.set_halign(Gtk.Align.START)
+            pwr_desc.set_xalign(0)
+            pwr_card.append(pwr_desc)
+
+            timeout_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            for t in (15, 30, 45, 60):
+                btn = Gtk.Button(label=str(t))
+                btn.add_css_class('pwr-btn')
+                if t == 30:
+                    btn.add_css_class('active')
+                btn.connect('clicked', self._on_timeout, t)
+                timeout_row.append(btn)
+                self._timeout_btns[t] = btn
+            pwr_card.append(timeout_row)
+            left.append(pwr_card)
+        else:
+            wired_note = Gtk.Label(label='Wireless power saving is only available\nwith the 2.4 GHz dongle or V3 Pro.')
+            wired_note.set_halign(Gtk.Align.START); wired_note.set_xalign(0)
+            wired_note.add_css_class('card')
+            left.append(wired_note)
 
         # right: LED indicator (informational only)
         right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
@@ -874,12 +1078,12 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             btn.set_label('ON')
             btn.remove_css_class('toggle-off')
             btn.add_css_class('toggle-on')
-            sysfs_write('wireless_power_save', str(self._pwr_timeout))
+            self._write('power_save', str(self._pwr_timeout))
         else:
             btn.set_label('OFF')
             btn.remove_css_class('toggle-on')
             btn.add_css_class('toggle-off')
-            sysfs_write('wireless_power_save', '0')
+            self._write('power_save', '0')
 
     def _on_timeout(self, btn, t):
         for tb in self._timeout_btns.values():
@@ -887,7 +1091,7 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         btn.add_css_class('active')
         self._pwr_timeout = t
         if self._pwr_on:
-            sysfs_write('wireless_power_save', str(t))
+            self._write('power_save', str(t))
 
 
 class App(Gtk.Application):

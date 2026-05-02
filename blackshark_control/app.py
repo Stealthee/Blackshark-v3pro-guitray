@@ -63,12 +63,12 @@ DEVICE_CAPS['0579'].update({
     'ull': None,
     'power_save': None,
 })
-# V3 Pro wired: same as V3 Pro wireless minus battery/charging/power_save/ULL.
+# V3 Pro wired: same as V3 Pro wireless minus power_save/ULL (those need the
+# wireless link). Battery is still present — the headset is just charging
+# whenever it's plugged in via USB-C.
 DEVICE_CAPS['0576'] = dict(DEVICE_CAPS['0577'])
 DEVICE_CAPS['0576'].update({
     'name': 'BlackShark V3 Pro (Wired)',
-    'battery': None,
-    'charging': None,
     'power_save': None,
     'ull': None,
 })

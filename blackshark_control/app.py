@@ -394,6 +394,7 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             self._status_label.remove_css_class('status-ok')
             self._status_label.add_css_class('status-err')
             self._connected_pid = None
+        self._refresh_battery_card()
         return True   # keep timer running
 
     # ── Sound tab ───────────────────────────────────────────────────────────
@@ -1163,9 +1164,36 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             wired_note.add_css_class('card')
             left.append(wired_note)
 
-        # right: LED indicator (informational only)
+        # right: battery (V3 Pro) + LED indicator (informational)
         right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         hbox.append(right)
+
+        if self._has('battery'):
+            bat_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+            bat_card.add_css_class('card')
+            bat_card.set_size_request(300, -1)
+            bat_lbl = Gtk.Label(label='BATTERY')
+            bat_lbl.add_css_class('section-label')
+            bat_lbl.set_halign(Gtk.Align.START)
+            bat_card.append(bat_lbl)
+
+            self._bat_pct_label = Gtk.Label(label='—')
+            self._bat_pct_label.set_halign(Gtk.Align.START)
+            self._bat_pct_label.set_xalign(0)
+            self._bat_pct_label.add_css_class('value-label')
+            bat_card.append(self._bat_pct_label)
+
+            self._bat_bar = Gtk.ProgressBar()
+            self._bat_bar.set_show_text(False)
+            self._bat_bar.set_fraction(0.0)
+            bat_card.append(self._bat_bar)
+
+            self._bat_status_label = Gtk.Label(label='')
+            self._bat_status_label.set_halign(Gtk.Align.START)
+            self._bat_status_label.set_xalign(0)
+            bat_card.append(self._bat_status_label)
+            right.append(bat_card)
+            self._refresh_battery_card()
 
         led_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         led_card.add_css_class('card')
@@ -1181,6 +1209,30 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         right.append(led_card)
 
         return outer
+
+    def _refresh_battery_card(self):
+        if not hasattr(self, '_bat_pct_label') or not self._device or not self._device.has('battery'):
+            return
+        bl = self._read('battery')
+        ch = self._read('charging')
+        try:
+            raw = int(bl) if bl is not None else -1
+        except ValueError:
+            raw = -1
+        if raw < 0:
+            self._bat_pct_label.set_text('—')
+            self._bat_bar.set_fraction(0.0)
+            self._bat_status_label.set_text('No reading from device yet')
+            return
+        pct = round(raw / 255 * 100)
+        self._bat_pct_label.set_text(f'{pct}%')
+        self._bat_bar.set_fraction(min(1.0, max(0.0, raw / 255)))
+        if ch == '1':
+            self._bat_status_label.set_text('Charging')
+        elif raw < 51:  # ~20%
+            self._bat_status_label.set_text('Low battery')
+        else:
+            self._bat_status_label.set_text('On battery')
 
     def _on_timeout(self, btn, t):
         for tb in self._timeout_btns.values():

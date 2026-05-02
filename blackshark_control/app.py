@@ -783,6 +783,7 @@ class BlackSharkControl(Gtk.ApplicationWindow):
                 b.add_css_class('pwr-btn')
                 if lvl == self._anc_level:
                     b.add_css_class('active')
+                b.set_sensitive(self._anc_mode == 1)
                 b.connect('clicked', self._on_anc_level, lvl)
                 anc_lvl_row.append(b)
                 self._anc_lvl_btns[lvl] = b
@@ -862,6 +863,9 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             b.remove_css_class('active')
         btn.add_css_class('active')
         self._anc_mode = mode
+        # Level only applies to ANC mode — Off and Ambient ignore it.
+        for lvl_btn in self._anc_lvl_btns.values():
+            lvl_btn.set_sensitive(mode == 1)
         self._write('anc', f'{mode} {self._anc_level}')
 
     def _on_anc_level(self, btn, lvl):

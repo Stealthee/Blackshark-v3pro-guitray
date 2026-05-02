@@ -112,6 +112,12 @@ sudo install -m 644 "$FORK_DIR/install_files/udev/99-razer.rules" \
     /etc/udev/rules.d/99-razer.rules
 sudo install -m 755 "$FORK_DIR/install_files/udev/razer_mount" \
     /usr/share/openrazer/razer_mount
+# PipeWire upstream doesn't tag V3 Pro PIDs with the gaming-headset
+# profile-set yet; this rule does so we get separate Game / Chat sinks.
+if [ -f "$FORK_DIR/install_files/udev/91-pipewire-blackshark-v3pro.rules" ]; then
+    sudo install -m 644 "$FORK_DIR/install_files/udev/91-pipewire-blackshark-v3pro.rules" \
+        /etc/udev/rules.d/91-pipewire-blackshark-v3pro.rules
+fi
 sudo udevadm control --reload-rules
 
 # ── 6. Make the user a member of plugdev ────────────────────────────────────

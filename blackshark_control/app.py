@@ -43,8 +43,8 @@ DEVICE_CAPS = {
         'eq': 'v3pro_headphone_eq',   # accepts single byte = slot index 0..8
         'eq_mode': 'slot-only',       # only switch between firmware slots
         'power_save': 'v3pro_power_save',
-        'battery': 'v3pro_battery_level',
-        'charging': 'v3pro_charging',
+        'battery': 'charge_level',          # 0..255 byte, scale /255*100 for %
+        'charging': 'charge_status',
         'anc': 'v3pro_anc',
         'mic_eq': 'mic_eq',           # shared with V3 — same 0x97 protocol
         'mic_eq_preset': 'mic_eq_preset',
@@ -373,10 +373,15 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             if self._device.has('battery'):
                 bl = self._read('battery')
                 ch = self._read('charging')
+                # charge_level is a 0..255 byte (openrazer convention); scale to percent.
                 if bl and bl != '-1':
-                    extras = f' · {bl}%'
-                    if ch == '1':
-                        extras += ' (charging)'
+                    try:
+                        pct = round(int(bl) / 255 * 100)
+                        extras = f' · battery {pct}%'
+                        if ch == '1':
+                            extras += ' (charging)'
+                    except ValueError:
+                        pass
             self._status_label.set_text(
                 f'{self._device.name} · {self._device.pid} · '
                 f'{os.path.basename(self._device.path)}{extras}'

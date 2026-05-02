@@ -46,17 +46,26 @@ if [ -n "$DKMS_VER" ]; then
 fi
 # Wipe both common install locations: DKMS (distro packages) and /extra/
 # (where this same script puts its build on a previous run — that's fine to
-# overwrite). Anything else on the modpath we can't reason about, so bail.
+# overwrite). A kernel-tree copy at /lib/modules/$VER/kernel/.../razerkraken.ko
+# is OK to leave alone: modprobe loads from /extra/ first, so our build wins.
 sudo rm -f "/lib/modules/$KERNEL/updates/dkms/razerkraken.ko"* \
            "/lib/modules/$KERNEL/extra/razerkraken.ko"*
 sudo depmod -a
 sudo rmmod razerkraken 2>/dev/null || true
 
-if modinfo -F filename razerkraken >/dev/null 2>&1; then
-    warn "razerkraken is STILL on the modpath at: $(modinfo -F filename razerkraken)"
-    warn "Unexpected location — delete it manually before re-running this script."
-    exit 1
-fi
+CURRENT_MOD="$(modinfo -F filename razerkraken 2>/dev/null || true)"
+case "$CURRENT_MOD" in
+    "" )
+        ;; # nothing on modpath, perfect
+    /lib/modules/*/kernel/* )
+        say "Kernel-tree razerkraken at $CURRENT_MOD — leaving alone (our /extra/ install will override)"
+        ;;
+    * )
+        warn "razerkraken is STILL on the modpath at: $CURRENT_MOD"
+        warn "Unexpected location — delete it manually before re-running this script."
+        exit 1
+        ;;
+esac
 
 # ── 3. Clone or update the openrazer fork ───────────────────────────────────
 say "Cloning/updating openrazer fork ($FORK_BRANCH)"

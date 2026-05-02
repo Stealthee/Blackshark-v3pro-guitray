@@ -292,10 +292,16 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             except (ValueError, TypeError): return default
 
         self._eq_target_profile = _int('eq', 0)
-        self._pwr_timeout = _int('power_save', 30) or 30
+        # Power-save: the sysfs value is 0 when disabled, otherwise the timeout in
+        # minutes — that conflates two facts. The user's *preferred* timeout (the
+        # button they last clicked) lives in 'power_save_timeout' in the JSON cache;
+        # 'power_save' tracks the live device state. On launch, prefer the cached
+        # preference, fall back to the live value, fall back to 30.
+        live_pwr = _int('power_save', 30)
+        self._pwr_timeout = _int('power_save_timeout', live_pwr) or live_pwr or 30
         self._thx_on = _gv('thx', '0') == '1'
         self._ull_on = _gv('ull', '1') == '1'
-        self._pwr_on = _int('power_save', 30) != 0
+        self._pwr_on = live_pwr != 0
         anc_raw = _gv('anc', '0 1').split()
         self._anc_mode  = int(anc_raw[0]) if anc_raw and anc_raw[0].isdigit() else 0
         self._anc_level = int(anc_raw[1]) if len(anc_raw) > 1 and anc_raw[1].isdigit() else 1
@@ -1135,6 +1141,8 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             tb.remove_css_class('active')
         btn.add_css_class('active')
         self._pwr_timeout = t
+        # Always remember the user's preferred timeout, even while disabled.
+        save_state_value(self._device.pid, 'power_save_timeout', t) if self._device else None
         if self._pwr_on:
             self._write('power_save', str(t))
 

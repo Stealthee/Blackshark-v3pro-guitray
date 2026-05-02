@@ -21,8 +21,8 @@ DEVICE_CAPS = {
         'eq': 'headphone_eq',         # accepts "<profile> b1..b10"
         'eq_mode': 'bands',           # full per-band control
         'power_save': 'wireless_power_save',
-        'battery': None,
-        'charging': None,
+        'battery': 'charge_level',    # 0..255 byte, scale /255*100 for %
+        'charging': 'charge_status',
         'anc': None,
         'mic_eq': 'mic_eq',
         'mic_eq_preset': 'mic_eq_preset',

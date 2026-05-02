@@ -109,6 +109,19 @@ fi
 say "Loading razerkraken module"
 sudo modprobe razerkraken
 
+# ── 7b. Manually fix sysfs perms for any already-bound device ───────────────
+# The udev rule fires on physical plug events, not on driver-bind via modprobe,
+# so the attrs come up root:root 0640 if the device was already plugged in.
+# chgrp + chmod here so the GUI works immediately, without forcing a replug.
+say "Setting sysfs perms on bound devices (matches udev rule)"
+shopt -s nullglob
+for dev_dir in /sys/bus/hid/drivers/razerkraken/0003:1532:*; do
+    [ -d "$dev_dir" ] || continue
+    sudo chgrp plugdev "$dev_dir"/* 2>/dev/null || true
+    sudo chmod g+rw  "$dev_dir"/* 2>/dev/null || true
+done
+shopt -u nullglob
+
 # ── 8. Install the GUI ──────────────────────────────────────────────────────
 say "Cloning/updating blackshark-control GUI"
 if [ ! -f "$GUI_DIR/pyproject.toml" ]; then

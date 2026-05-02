@@ -44,14 +44,17 @@ DKMS_VER="$(dkms status 2>/dev/null | awk -F'[/,]' '/openrazer/ {print $2; exit}
 if [ -n "$DKMS_VER" ]; then
     sudo dkms remove "openrazer-driver/$DKMS_VER" --all || true
 fi
-sudo rm -f "/lib/modules/$KERNEL/updates/dkms/razerkraken.ko"*
+# Wipe both common install locations: DKMS (distro packages) and /extra/
+# (where this same script puts its build on a previous run — that's fine to
+# overwrite). Anything else on the modpath we can't reason about, so bail.
+sudo rm -f "/lib/modules/$KERNEL/updates/dkms/razerkraken.ko"* \
+           "/lib/modules/$KERNEL/extra/razerkraken.ko"*
 sudo depmod -a
 sudo rmmod razerkraken 2>/dev/null || true
 
 if modinfo -F filename razerkraken >/dev/null 2>&1; then
     warn "razerkraken is STILL on the modpath at: $(modinfo -F filename razerkraken)"
-    warn "Delete that file manually before re-running this script — otherwise the"
-    warn "kernel will keep loading the wrong .ko on every boot."
+    warn "Unexpected location — delete it manually before re-running this script."
     exit 1
 fi
 

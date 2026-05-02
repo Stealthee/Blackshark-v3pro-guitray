@@ -1197,10 +1197,12 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         """Update the battery indicator parked in the notebook's action area."""
         if not hasattr(self, '_bat_widget'):
             return
-        if not self._device or not self._device.has('battery'):
-            self._bat_widget.set_visible(False)
+        if not self._device:
+            self._bat_label.set_text('battery —')
             return
-        self._bat_widget.set_visible(True)
+        if not self._device.has('battery'):
+            self._bat_label.set_text('battery N/A')
+            return
         bl = self._read('battery')
         ch = self._read('charging')
         try:
@@ -1211,7 +1213,7 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             self._bat_label.set_text('battery —')
             return
         pct = round(raw / 255 * 100)
-        suffix = ' charging' if ch == '1' else ''
+        suffix = ' · charging' if ch == '1' else ''
         self._bat_label.set_text(f'battery {pct}%{suffix}')
 
     def _on_timeout(self, btn, t):

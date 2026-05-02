@@ -14,7 +14,17 @@ KERNEL="$(uname -r)"
 FORK_REPO="${FORK_REPO:-https://github.com/mehmetbayoglu/openrazer.git}"
 FORK_BRANCH="${FORK_BRANCH:-blackshark-v3-pro}"
 FORK_DIR="${FORK_DIR:-$HOME/openrazer-blackshark}"
-GUI_DIR="${GUI_DIR:-$(cd "$(dirname "$0")" && pwd)}"
+GUI_REPO="${GUI_REPO:-https://github.com/mehmetbayoglu/blackshark-control.git}"
+
+# Detect whether we were piped from curl ($0 = bash) vs invoked from a checkout.
+# When piped, clone fresh to $HOME/blackshark-control. When invoked from a
+# checkout, install from that checkout directly.
+SCRIPT_PATH="${BASH_SOURCE[0]:-$0}"
+if [ -f "$SCRIPT_PATH" ] && [ -f "$(dirname "$SCRIPT_PATH")/pyproject.toml" ]; then
+    GUI_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+else
+    GUI_DIR="${GUI_DIR:-$HOME/blackshark-control}"
+fi
 
 say()  { printf '\n\033[1;32m::\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m!!\033[0m %s\n' "$*" >&2; }
@@ -88,6 +98,14 @@ say "Loading razerkraken module"
 sudo modprobe razerkraken
 
 # ── 8. Install the GUI ──────────────────────────────────────────────────────
+say "Cloning/updating blackshark-control GUI"
+if [ ! -f "$GUI_DIR/pyproject.toml" ]; then
+    [ -d "$GUI_DIR" ] && rm -rf "$GUI_DIR"
+    git clone "$GUI_REPO" "$GUI_DIR"
+else
+    git -C "$GUI_DIR" pull --ff-only 2>/dev/null || true
+fi
+
 say "Removing any /usr/local shim from a previous install"
 sudo rm -f /usr/local/bin/blackshark-control
 

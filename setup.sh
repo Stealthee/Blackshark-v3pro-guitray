@@ -39,15 +39,15 @@ pkill -f blackshark-control 2>/dev/null || true
 say "Removing distro openrazer-driver-dkms / openrazer-daemon if present"
 sudo pacman -Rns --noconfirm openrazer-driver-dkms openrazer-daemon 2>/dev/null || true
 
-say "Removing any DKMS-registered razerkraken"
-DKMS_VER="$(dkms status 2>/dev/null | awk -F'[/,]' '/openrazer/ {print $2; exit}' || true)"
-if [ -n "$DKMS_VER" ]; then
-    sudo dkms remove "openrazer-driver/$DKMS_VER" --all || true
-fi
-# Wipe both common install locations: DKMS (distro packages) and /extra/
-# (where this same script puts its build on a previous run — that's fine to
-# overwrite). A kernel-tree copy at /lib/modules/$VER/kernel/.../razerkraken.ko
-# is OK to leave alone: modprobe loads from /extra/ first, so our build wins.
+say "Removing every prior openrazer-driver DKMS install"
+while read -r entry; do
+    [ -n "$entry" ] || continue
+    sudo dkms remove "$entry" --all 2>/dev/null || true
+done < <(dkms status 2>/dev/null | awk -F', ' '/^openrazer-driver/ {print $1}')
+sudo rm -rf /usr/src/openrazer-driver-*
+# Wipe leftover .ko files DKMS or earlier non-DKMS installs may have left.
+# A kernel-tree copy at /lib/modules/$VER/kernel/.../razerkraken.ko is fine to
+# keep: modprobe priority puts /updates/dkms/ above /kernel/, so our build wins.
 sudo rm -f "/lib/modules/$KERNEL/updates/dkms/razerkraken.ko"* \
            "/lib/modules/$KERNEL/extra/razerkraken.ko"*
 sudo depmod -a
@@ -58,7 +58,7 @@ case "$CURRENT_MOD" in
     "" )
         ;; # nothing on modpath, perfect
     /lib/modules/*/kernel/* )
-        say "Kernel-tree razerkraken at $CURRENT_MOD — leaving alone (our /extra/ install will override)"
+        say "Kernel-tree razerkraken at $CURRENT_MOD — leaving alone (our DKMS install will override)"
         ;;
     * )
         warn "razerkraken is STILL on the modpath at: $CURRENT_MOD"
@@ -77,18 +77,35 @@ else
     git -C "$FORK_DIR" pull --ff-only
 fi
 
-# ── 4. Build the kernel module (LLVM=1 for clang-built kernels) ─────────────
-say "Building razerkraken module"
-make -C "$FORK_DIR/driver" clean 2>/dev/null || true
-make -C "$FORK_DIR" driver LLVM=1
+# ── 4. Install via DKMS so kernel updates auto-rebuild ──────────────────────
+DKMS_PACKAGE="openrazer-driver"
+DKMS_VERSION="3.12.99-blackshark-fork"
 
-# ── 5. Install module + udev rule + razer_mount helper ──────────────────────
-say "Installing module to /lib/modules/$KERNEL/extra/"
-sudo install -D -m 644 "$FORK_DIR/driver/razerkraken.ko" \
-    "/lib/modules/$KERNEL/extra/razerkraken.ko"
-sudo depmod -a
-echo razerkraken | sudo tee /etc/modules-load.d/razerkraken.conf >/dev/null
+if ! command -v dkms >/dev/null 2>&1; then
+    say "Installing dkms"
+    sudo pacman -S --noconfirm --needed dkms 2>/dev/null \
+        || sudo apt install -y dkms 2>/dev/null \
+        || sudo dnf install -y dkms 2>/dev/null \
+        || { warn "Couldn't auto-install dkms — install it for your distro and rerun."; exit 1; }
+fi
 
+say "Removing any prior $DKMS_PACKAGE/$DKMS_VERSION DKMS install"
+sudo dkms remove "$DKMS_PACKAGE/$DKMS_VERSION" --all 2>/dev/null || true
+sudo rm -rf "/usr/src/$DKMS_PACKAGE-$DKMS_VERSION"
+
+say "Registering source tree at /usr/src/$DKMS_PACKAGE-$DKMS_VERSION"
+sudo cp -r "$FORK_DIR" "/usr/src/$DKMS_PACKAGE-$DKMS_VERSION"
+sudo cp "$FORK_DIR/install_files/dkms/dkms.conf" "/usr/src/$DKMS_PACKAGE-$DKMS_VERSION/dkms.conf"
+# Override PACKAGE_VERSION to our fork-specific tag so we never collide with
+# whatever upstream openrazer-driver version the distro might ship.
+sudo sed -i "s/^PACKAGE_VERSION=.*/PACKAGE_VERSION=\"$DKMS_VERSION\"/" \
+    "/usr/src/$DKMS_PACKAGE-$DKMS_VERSION/dkms.conf"
+
+say "Building + installing via dkms (auto-rebuilds on every kernel update)"
+sudo dkms add -m "$DKMS_PACKAGE" -v "$DKMS_VERSION"
+sudo dkms install -m "$DKMS_PACKAGE" -v "$DKMS_VERSION" --force
+
+# ── 5. Install udev rule + razer_mount helper ───────────────────────────────
 say "Installing udev rule and razer_mount helper"
 sudo mkdir -p /usr/share/openrazer
 sudo install -m 644 "$FORK_DIR/install_files/udev/99-razer.rules" \

@@ -46,9 +46,9 @@ DEVICE_CAPS = {
         'battery': 'v3pro_battery_level',
         'charging': 'v3pro_charging',
         'anc': 'v3pro_anc',
-        'mic_eq': None,               # not yet exposed in V3 Pro driver path
-        'mic_eq_preset': None,
-        'audio_fn_button': None,
+        'mic_eq': 'mic_eq',           # shared with V3 — same 0x97 protocol
+        'mic_eq_preset': 'mic_eq_preset',
+        'audio_fn_button': None,      # V3 Pro lacks the V3-style FN button
         'mic_volume_uac2': True,
         'game_chat': 'game_chat_balance',
         'in_call_mix': 'in_call_audio_mix',

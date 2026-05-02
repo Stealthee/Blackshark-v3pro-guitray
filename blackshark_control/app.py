@@ -278,7 +278,6 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         self._eq_apply_timer = None
         self._eq_custom = load_eq_config()
         self._mic_eq_custom = load_mic_eq_config()
-        self._mic_target_idx = 0
         self._connected_pid = self._device.pid if self._device else None
         self._mic_vol_slider = None
         self._ignore_slider = False
@@ -291,17 +290,16 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             try: return int(_gv(feature, str(default)))
             except (ValueError, TypeError): return default
 
-        self._eq_target_profile = _int('eq', 0)
-        # Power-save: the sysfs value is 0 when disabled, otherwise the timeout in
-        # minutes — that conflates two facts. The user's *preferred* timeout (the
-        # button they last clicked) lives in 'power_save_timeout' in the JSON cache;
-        # 'power_save' tracks the live device state. On launch, prefer the cached
-        # preference, fall back to the live value, fall back to 30.
-        live_pwr = _int('power_save', 30)
-        self._pwr_timeout = _int('power_save_timeout', live_pwr) or live_pwr or 30
+        # 'eq' must come from JSON state (driver's sysfs read returns only the
+        # bands, no profile prefix — first token would be band 0, not profile).
+        eq_state = (self._device.state.get('eq', '') if self._device else '').split()
+        try: self._eq_target_profile = int(eq_state[0]) if eq_state else 0
+        except ValueError: self._eq_target_profile = 0
+        # Power-save timeout in minutes. 0 = "Never sleep" (a valid choice, not
+        # disabled state — the toggle was UX bloat that conflated this).
+        self._pwr_timeout = _int('power_save', 30)
         self._thx_on = _gv('thx', '0') == '1'
         self._ull_on = _gv('ull', '1') == '1'
-        self._pwr_on = live_pwr != 0
         anc_raw = _gv('anc', '0 1').split()
         self._anc_mode  = int(anc_raw[0]) if anc_raw and anc_raw[0].isdigit() else 0
         self._anc_level = int(anc_raw[1]) if len(anc_raw) > 1 and anc_raw[1].isdigit() else 1
@@ -309,6 +307,8 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         self._in_call_mix    = _int('in_call_mix', 0)
         self._audio_prompts  = _gv('audio_prompts', '1') == '1'
         self._sidetone_level = _int('sidetone', 0)
+        self._mic_target_idx = _int('mic_eq_preset', 0)
+        self._fn_mode        = _int('audio_fn_button', 1)
 
         # status refresh
         GLib.timeout_add(2000, self._refresh_status)
@@ -325,8 +325,12 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         self.set_title(f'{self._device.name} Control' if self._device
                        else 'BlackShark Control')
         self._refresh_status()
-        # load Default preset into sliders on startup
-        GLib.idle_add(self._load_default_preset)
+        # Load the cached EQ preset into sliders on startup.
+        GLib.idle_add(self._load_cached_preset)
+        # Push cached mic-EQ band values into the slider widgets too. Skip the
+        # write-back to the device so we don't re-apply on every launch.
+        if self._has('mic_eq'):
+            GLib.idle_add(lambda: (self._load_mic_sliders(self._mic_eq_values), False)[1])
 
     def _has(self, feature):
         return self._device is not None and self._device.has(feature)
@@ -339,8 +343,11 @@ class BlackSharkControl(Gtk.ApplicationWindow):
     def _read(self, feature):
         return self._device.read(feature) if self._device else None
 
-    def _load_default_preset(self):
-        self._on_preset(self._preset_btns['Default'], 'Default')
+    def _load_cached_preset(self):
+        # Find the preset name corresponding to the cached profile index.
+        name = next((n for n, i in PRESET_IDX.items() if i == self._eq_target_profile),
+                    'Default')
+        self._on_preset(self._preset_btns[name], name)
         return False
 
     # ── status bar ──────────────────────────────────────────────────────────
@@ -895,11 +902,14 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             for i, name in enumerate(MIC_EQ_PRESETS):
                 b = Gtk.Button(label=name)
                 b.add_css_class('pwr-btn')
-                if i == 0:
+                if i == self._mic_target_idx:
                     b.add_css_class('active')
                 b.connect('clicked', self._on_mic_preset, i)
                 mp_row.append(b)
                 self._mic_preset_btns[i] = b
+            # Restore the cached preset's bands into the sliders.
+            self._mic_eq_values = list(self._mic_eq_custom.get(
+                self._mic_target_idx, MIC_EQ_FACTORY[self._mic_target_idx]))
             mp_card.append(mp_row)
             outer.append(mp_card)
 
@@ -955,6 +965,8 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             for mode_val, mode_name in [(1, 'Sidetone Save'), (2, 'Footsteps Scaling')]:
                 b = Gtk.Button(label=mode_name)
                 b.add_css_class('pwr-btn')
+                if mode_val == self._fn_mode:
+                    b.add_css_class('active')
                 b.connect('clicked', self._on_fn_button, mode_val)
                 fn_row.append(b)
                 self._fn_btns[mode_val] = b
@@ -975,7 +987,6 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         self._ap_btn = Gtk.Button(label='ON' if self._audio_prompts else 'OFF')
         self._ap_btn.add_css_class('toggle-on' if self._audio_prompts else 'toggle-off')
         self._ap_btn.set_halign(Gtk.Align.START)
-        self._ap_on = True
         self._ap_btn.connect('clicked', self._on_audio_prompts)
         ap_card.append(self._ap_btn)
         outer.append(ap_card)
@@ -983,8 +994,8 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         return outer
 
     def _on_audio_prompts(self, btn):
-        self._ap_on = not self._ap_on
-        if self._ap_on:
+        self._audio_prompts = not self._audio_prompts
+        if self._audio_prompts:
             btn.set_label('ON')
             btn.remove_css_class('toggle-off')
             btn.add_css_class('toggle-on')
@@ -992,7 +1003,7 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             btn.set_label('OFF')
             btn.remove_css_class('toggle-on')
             btn.add_css_class('toggle-off')
-        self._write('audio_prompts', '1' if self._ap_on else '0')
+        self._write('audio_prompts', '1' if self._audio_prompts else '0')
 
     def _on_sidetone(self, sl):
         val = int(round(sl.get_value()))
@@ -1076,20 +1087,14 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             pwr_lbl.set_halign(Gtk.Align.START)
             pwr_card.append(pwr_lbl)
 
-            self._pwr_toggle_btn = Gtk.Button(label='ON' if self._pwr_on else 'OFF')
-            self._pwr_toggle_btn.add_css_class('toggle-on' if self._pwr_on else 'toggle-off')
-            self._pwr_toggle_btn.set_halign(Gtk.Align.START)
-            self._pwr_toggle_btn.connect('clicked', self._on_pwr_toggle)
-            pwr_card.append(self._pwr_toggle_btn)
-
-            pwr_desc = Gtk.Label(label='Device will turn off after (mins) of inactivity:')
+            pwr_desc = Gtk.Label(label='Sleep after this many minutes of inactivity:')
             pwr_desc.set_halign(Gtk.Align.START)
             pwr_desc.set_xalign(0)
             pwr_card.append(pwr_desc)
 
             timeout_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-            for t in (15, 30, 45, 60):
-                btn = Gtk.Button(label=str(t))
+            for t, label in [(0, 'Never'), (15, '15'), (30, '30'), (45, '45'), (60, '60')]:
+                btn = Gtk.Button(label=label)
                 btn.add_css_class('pwr-btn')
                 if t == self._pwr_timeout:
                     btn.add_css_class('active')
@@ -1123,28 +1128,12 @@ class BlackSharkControl(Gtk.ApplicationWindow):
 
         return outer
 
-    def _on_pwr_toggle(self, btn):
-        self._pwr_on = not self._pwr_on
-        if self._pwr_on:
-            btn.set_label('ON')
-            btn.remove_css_class('toggle-off')
-            btn.add_css_class('toggle-on')
-            self._write('power_save', str(self._pwr_timeout))
-        else:
-            btn.set_label('OFF')
-            btn.remove_css_class('toggle-on')
-            btn.add_css_class('toggle-off')
-            self._write('power_save', '0')
-
     def _on_timeout(self, btn, t):
         for tb in self._timeout_btns.values():
             tb.remove_css_class('active')
         btn.add_css_class('active')
         self._pwr_timeout = t
-        # Always remember the user's preferred timeout, even while disabled.
-        save_state_value(self._device.pid, 'power_save_timeout', t) if self._device else None
-        if self._pwr_on:
-            self._write('power_save', str(t))
+        self._write('power_save', str(t))
 
 
 class App(Gtk.Application):

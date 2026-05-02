@@ -7,7 +7,7 @@ from gi.repository import Gtk, GLib, Gdk, Pango
 import glob, os, subprocess, json
 
 SYSFS_DIR = '/sys/bus/hid/drivers/razerkraken'
-PIDS = ('0577', '057A', '0579')   # V3 Pro, V3 wireless dongle, V3 wired
+PIDS = ('0576', '0577', '057A', '0579')   # V3 Pro wired, V3 Pro 2.4GHz, V3 wireless dongle, V3 wired
 
 # Per-PID feature/capability map. Each entry is the sysfs attr name (or None).
 # A feature with attr=None is hidden in the GUI for that device.
@@ -62,6 +62,15 @@ DEVICE_CAPS['0579'].update({
     'name': 'BlackShark V3 (Wired)',
     'ull': None,
     'power_save': None,
+})
+# V3 Pro wired: same as V3 Pro wireless minus battery/charging/power_save/ULL.
+DEVICE_CAPS['0576'] = dict(DEVICE_CAPS['0577'])
+DEVICE_CAPS['0576'].update({
+    'name': 'BlackShark V3 Pro (Wired)',
+    'battery': None,
+    'charging': None,
+    'power_save': None,
+    'ull': None,
 })
 
 EQ_FREQS = ['31Hz','63Hz','125Hz','250Hz','500Hz','1kHz','2kHz','4kHz','8kHz','16kHz']
@@ -125,6 +134,17 @@ def save_mic_eq_config(mic_eq_custom):
     data['mic_eq_custom'] = {str(k): v for k, v in mic_eq_custom.items()}
     _write_config(data)
 
+def load_state(pid):
+    """Per-device state cache: feature → last-written string value.
+    Used as fallback when the driver returns -1 (no SET this session)."""
+    return _read_config().get('state', {}).get(pid, {})
+
+def save_state_value(pid, feature, value):
+    data = _read_config()
+    state = data.setdefault('state', {}).setdefault(pid, {})
+    state[feature] = str(value)
+    _write_config(data)
+
 CSS = b"""
 * { font-family: "Noto Sans", sans-serif; }
 window, .main-box { background-color: #111111; color: #eeeeee; }
@@ -175,7 +195,8 @@ class Device:
         self.pid = pid
         self.caps = DEVICE_CAPS[pid]
         self.name = self.caps['name']
-        self.is_v3_pro = (pid == '0577')
+        self.is_v3_pro = (pid in ('0576', '0577'))
+        self.state = load_state(pid)
 
     @classmethod
     def detect(cls):
@@ -195,6 +216,8 @@ class Device:
         try:
             with open(f'{self.path}/{attr}', 'w') as f:
                 f.write(str(value))
+            self.state[feature] = str(value)
+            save_state_value(self.pid, feature, value)
             return True, None
         except Exception as e:
             return False, str(e)
@@ -208,6 +231,14 @@ class Device:
                 return f.read().strip()
         except Exception:
             return None
+
+    def get_value(self, feature, fallback=None):
+        """Driver cache > JSON cache > fallback. Returns the raw string or fallback.
+        '-1' from the driver means 'no SET this session' — treated as no value."""
+        v = self.read(feature)
+        if v is not None and v != '-1' and not v.startswith('-1 '):
+            return v
+        return self.state.get(feature, fallback)
 
 
 def sysfs_read(attr):
@@ -244,20 +275,34 @@ class BlackSharkControl(Gtk.ApplicationWindow):
 
         self._eq_sliders = []
         self._eq_values = [0] * 10
-        self._eq_target_profile = 0
         self._eq_apply_timer = None
         self._eq_custom = load_eq_config()
         self._mic_eq_custom = load_mic_eq_config()
         self._mic_target_idx = 0
         self._connected_pid = self._device.pid if self._device else None
         self._mic_vol_slider = None
-        self._pwr_timeout = 30
-        self._thx_on = False
-        self._ull_on = True
-        self._pwr_on = True
         self._ignore_slider = False
-        self._anc_mode = 0
-        self._anc_level = 1
+
+        # Seed UI state from driver cache → JSON cache → defaults.
+        def _gv(feature, default):
+            v = self._device.get_value(feature, default) if self._device else default
+            return v if v is not None else default
+        def _int(feature, default):
+            try: return int(_gv(feature, str(default)))
+            except (ValueError, TypeError): return default
+
+        self._eq_target_profile = _int('eq', 0)
+        self._pwr_timeout = _int('power_save', 30) or 30
+        self._thx_on = _gv('thx', '0') == '1'
+        self._ull_on = _gv('ull', '1') == '1'
+        self._pwr_on = _int('power_save', 30) != 0
+        anc_raw = _gv('anc', '0 1').split()
+        self._anc_mode  = int(anc_raw[0]) if anc_raw and anc_raw[0].isdigit() else 0
+        self._anc_level = int(anc_raw[1]) if len(anc_raw) > 1 and anc_raw[1].isdigit() else 1
+        self._gc_balance     = _int('game_chat', 10)
+        self._in_call_mix    = _int('in_call_mix', 0)
+        self._audio_prompts  = _gv('audio_prompts', '1') == '1'
+        self._sidetone_level = _int('sidetone', 0)
 
         # status refresh
         GLib.timeout_add(2000, self._refresh_status)
@@ -362,8 +407,8 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         thx_lbl.set_halign(Gtk.Align.START)
         thx_card.append(thx_lbl)
         thx_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self._thx_btn = Gtk.Button(label='STEREO')
-        self._thx_btn.add_css_class('toggle-off')
+        self._thx_btn = Gtk.Button(label='THX' if self._thx_on else 'STEREO')
+        self._thx_btn.add_css_class('toggle-on' if self._thx_on else 'toggle-off')
         self._thx_btn.connect('clicked', self._on_thx_toggle)
         thx_row.append(self._thx_btn)
         thx_card.append(thx_row)
@@ -657,8 +702,8 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             ull_desc.set_xalign(0)
             ull_card.append(ull_desc)
 
-            self._ull_btn = Gtk.Button(label='ON')
-            self._ull_btn.add_css_class('toggle-on')
+            self._ull_btn = Gtk.Button(label='ON' if self._ull_on else 'OFF')
+            self._ull_btn.add_css_class('toggle-on' if self._ull_on else 'toggle-off')
             self._ull_btn.set_halign(Gtk.Align.START)
             self._ull_btn.connect('clicked', self._on_ull_toggle)
             ull_card.append(self._ull_btn)
@@ -678,7 +723,7 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             for mode_val, mode_name in [(0, 'Off'), (1, 'ANC'), (2, 'Ambient')]:
                 b = Gtk.Button(label=mode_name)
                 b.add_css_class('pwr-btn')
-                if mode_val == 0:
+                if mode_val == self._anc_mode:
                     b.add_css_class('active')
                 b.connect('clicked', self._on_anc_mode, mode_val)
                 anc_mode_row.append(b)
@@ -693,7 +738,7 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             for lvl in (1, 2, 3, 4):
                 b = Gtk.Button(label=str(lvl))
                 b.add_css_class('pwr-btn')
-                if lvl == 1:
+                if lvl == self._anc_level:
                     b.add_css_class('active')
                 b.connect('clicked', self._on_anc_level, lvl)
                 anc_lvl_row.append(b)
@@ -714,7 +759,7 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         gc_card.append(gc_desc)
         gc_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         self._gc_slider = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 20, 1)
-        self._gc_slider.set_value(10)
+        self._gc_slider.set_value(self._gc_balance)
         self._gc_slider.set_hexpand(True)
         self._gc_slider.set_draw_value(True)
         self._gc_slider.connect('value-changed', self._on_game_chat_balance)
@@ -741,7 +786,7 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             b.connect('clicked', self._on_in_call_mix, mode_val)
             ic_row.append(b)
             self._ic_btns[mode_val] = b
-        self._ic_btns[0].add_css_class('active')
+        self._ic_btns[self._in_call_mix].add_css_class('active')
         ic_card.append(ic_row)
         outer.append(ic_card)
 
@@ -815,7 +860,7 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         st_card.append(st_lbl)
         st_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         st_lbl0 = Gtk.Label(label='0'); st_lbl0.add_css_class('db-label')
-        st_adj = Gtk.Adjustment(value=0, lower=0, upper=15, step_increment=1, page_increment=1)
+        st_adj = Gtk.Adjustment(value=self._sidetone_level, lower=0, upper=15, step_increment=1, page_increment=1)
         self._sidetone_slider = Gtk.Scale(orientation=Gtk.Orientation.HORIZONTAL, adjustment=st_adj)
         self._sidetone_slider.set_hexpand(True)
         self._sidetone_slider.set_draw_value(True)
@@ -921,8 +966,8 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         ap_desc.set_halign(Gtk.Align.START)
         ap_desc.set_xalign(0)
         ap_card.append(ap_desc)
-        self._ap_btn = Gtk.Button(label='ON')
-        self._ap_btn.add_css_class('toggle-on')
+        self._ap_btn = Gtk.Button(label='ON' if self._audio_prompts else 'OFF')
+        self._ap_btn.add_css_class('toggle-on' if self._audio_prompts else 'toggle-off')
         self._ap_btn.set_halign(Gtk.Align.START)
         self._ap_on = True
         self._ap_btn.connect('clicked', self._on_audio_prompts)
@@ -1025,8 +1070,8 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             pwr_lbl.set_halign(Gtk.Align.START)
             pwr_card.append(pwr_lbl)
 
-            self._pwr_toggle_btn = Gtk.Button(label='ON')
-            self._pwr_toggle_btn.add_css_class('toggle-on')
+            self._pwr_toggle_btn = Gtk.Button(label='ON' if self._pwr_on else 'OFF')
+            self._pwr_toggle_btn.add_css_class('toggle-on' if self._pwr_on else 'toggle-off')
             self._pwr_toggle_btn.set_halign(Gtk.Align.START)
             self._pwr_toggle_btn.connect('clicked', self._on_pwr_toggle)
             pwr_card.append(self._pwr_toggle_btn)
@@ -1040,7 +1085,7 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             for t in (15, 30, 45, 60):
                 btn = Gtk.Button(label=str(t))
                 btn.add_css_class('pwr-btn')
-                if t == 30:
+                if t == self._pwr_timeout:
                     btn.add_css_class('active')
                 btn.connect('clicked', self._on_timeout, t)
                 timeout_row.append(btn)

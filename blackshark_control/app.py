@@ -4,7 +4,7 @@
 import gi
 gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk, GLib, Gdk, Pango
-import glob, os, subprocess, json
+import glob, os, subprocess, json, threading
 
 SYSFS_DIR = '/sys/bus/hid/drivers/razerkraken'
 PIDS = ('0576', '0577', '057A', '0579')   # V3 Pro wired, V3 Pro 2.4GHz, V3 wireless dongle, V3 wired
@@ -240,6 +240,13 @@ class Device:
             return v
         return self.state.get(feature, fallback)
 
+    def get_value_cached(self, feature, fallback=None):
+        """JSON cache > fallback only — never touches sysfs. Use during startup
+        to avoid blocking on GETs that take 2s when the firmware response gate
+        is tripped (V3 wireless on Linux). The 2s _refresh_status timer will
+        sync from sysfs once the window is up."""
+        return self.state.get(feature, fallback)
+
 
 def sysfs_read(attr):
     """Legacy direct-attr read (used by code that already knows the attr name)."""
@@ -282,9 +289,12 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         self._mic_vol_slider = None
         self._ignore_slider = False
 
-        # Seed UI state from driver cache → JSON cache → defaults.
+        # Seed UI state from JSON cache → defaults. Skip sysfs reads at startup
+        # because some attrs (thx, ull, battery on V3 wireless) issue blocking
+        # GETs that take ~2s each when the firmware response gate is tripped.
+        # _refresh_status (2s timer) re-syncs from sysfs in the background.
         def _gv(feature, default):
-            v = self._device.get_value(feature, default) if self._device else default
+            v = self._device.get_value_cached(feature, default) if self._device else default
             return v if v is not None else default
         def _int(feature, default):
             try: return int(_gv(feature, str(default)))
@@ -350,6 +360,9 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             return False, 'device not found'
         return self._device.write(feature, value)
 
+    # Back-compat alias for callers that explicitly want sync semantics.
+    _write_sync = _write
+
     def _read(self, feature):
         return self._device.read(feature) if self._device else None
 
@@ -379,22 +392,9 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             self._device = None
 
         if self._device:
-            extras = ''
-            if self._device.has('battery'):
-                bl = self._read('battery')
-                ch = self._read('charging')
-                # charge_level is a 0..255 byte (openrazer convention); scale to percent.
-                if bl and bl != '-1':
-                    try:
-                        pct = round(int(bl) / 255 * 100)
-                        extras = f' · battery {pct}%'
-                        if ch == '1':
-                            extras += ' (charging)'
-                    except ValueError:
-                        pass
             self._status_label.set_text(
                 f'{self._device.name} · {self._device.pid} · '
-                f'{os.path.basename(self._device.path)}{extras}'
+                f'{os.path.basename(self._device.path)}'
             )
             self._status_label.remove_css_class('status-err')
             self._status_label.add_css_class('status-ok')
@@ -720,7 +720,7 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         write_val = (str(profile_idx) if self._device and self._device.caps.get('eq_mode') == 'slot-only'
                      else val_str)
         def _worker():
-            ok, err = self._write('eq', write_val)
+            ok, err = self._write_sync('eq', write_val)
             def _on_done():
                 if ok:
                     self._eq_custom[profile_idx] = snapshot_vals
@@ -1021,7 +1021,15 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             fn_lbl.set_halign(Gtk.Align.START)
             fn_card.append(fn_lbl)
             fn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-            for mode_val, mode_name in [(1, 'Sidetone Save'), (2, 'Footsteps Scaling')]:
+            # All 4 bytes verified on-device 2026-05-03 after widening the
+            # driver's clamp from 1..2 to 0..255. Earlier "sidetone == bluetooth"
+            # confusion was the driver rejecting byte 3 with -EINVAL.
+            for mode_val, mode_name in [
+                (0, 'Game/Chat'),
+                (1, 'Sidetone Save'),
+                (2, 'Footsteps Scaling'),
+                (3, 'Bluetooth Volume'),
+            ]:
                 b = Gtk.Button(label=mode_name)
                 b.add_css_class('pwr-btn')
                 if mode_val == self._fn_mode:
@@ -1194,7 +1202,9 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         return outer
 
     def _refresh_battery_widget(self):
-        """Update the battery indicator parked in the notebook's action area."""
+        """Update the battery indicator parked in the notebook's action area.
+        Runs the sysfs reads on a worker thread because each can block ~2s when
+        the firmware response gate is tripped (V3 wireless on Linux)."""
         if not hasattr(self, '_bat_widget'):
             return
         if not self._device:
@@ -1203,18 +1213,29 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         if not self._device.has('battery'):
             self._bat_label.set_text('battery N/A')
             return
-        bl = self._read('battery')
-        ch = self._read('charging')
+        if getattr(self, '_bat_refresh_inflight', False):
+            return  # don't pile up worker threads
+        self._bat_refresh_inflight = True
+
+        def _worker():
+            bl = self._read('battery')
+            ch = self._read('charging')
+            GLib.idle_add(self._battery_update_done, bl, ch)
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _battery_update_done(self, bl, ch):
+        self._bat_refresh_inflight = False
         try:
             raw = int(bl) if bl is not None else -1
         except ValueError:
             raw = -1
         if raw < 0:
             self._bat_label.set_text('battery —')
-            return
+            return False
         pct = round(raw / 255 * 100)
         suffix = ' · charging' if ch == '1' else ''
         self._bat_label.set_text(f'battery {pct}%{suffix}')
+        return False  # one-shot
 
     def _on_timeout(self, btn, t):
         for tb in self._timeout_btns.values():

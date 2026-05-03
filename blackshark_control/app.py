@@ -392,9 +392,22 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             self._device = None
 
         if self._device:
+            extras = ''
+            if self._device.has('battery'):
+                bl = self._read('battery')
+                ch = self._read('charging')
+                # charge_level is a 0..255 byte (openrazer convention); /255*100 → %.
+                if bl and bl != '-1':
+                    try:
+                        pct = round(int(bl) / 255 * 100)
+                        extras = f' · battery {pct}%'
+                        if ch == '1':
+                            extras += ' (charging)'
+                    except ValueError:
+                        pass
             self._status_label.set_text(
                 f'{self._device.name} · {self._device.pid} · '
-                f'{os.path.basename(self._device.path)}'
+                f'{os.path.basename(self._device.path)}{extras}'
             )
             self._status_label.remove_css_class('status-err')
             self._status_label.add_css_class('status-ok')

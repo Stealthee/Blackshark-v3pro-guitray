@@ -108,8 +108,15 @@ if [ "$DO_DRIVER" = 1 ]; then
     sudo rsync -a --delete --exclude='.git' "$OPENRAZER_DIR/" "$DKMS_SRC/"
 
     step "rebuilding kernel module via DKMS"
+    # remove --all may leave the source-registration on some DKMS versions —
+    # so we add only if not already in tree, and then install --force which
+    # rebuilds against the just-rsynced source.
     sudo dkms remove -m "${DKMS_NAME}" -v "${DKMS_VER}" --all 2>/dev/null || true
-    sudo dkms add    -m "${DKMS_NAME}" -v "${DKMS_VER}"
+    if ! sudo dkms status -m "${DKMS_NAME}" -v "${DKMS_VER}" 2>/dev/null | grep -q "${DKMS_NAME}"; then
+        sudo dkms add -m "${DKMS_NAME}" -v "${DKMS_VER}"
+    else
+        yellow "dkms tree already has ${DKMS_NAME}/${DKMS_VER} — skipping add (install --force will rebuild)"
+    fi
     sudo dkms install -m "${DKMS_NAME}" -v "${DKMS_VER}" --force
 
     step "installing udev rules"

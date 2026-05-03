@@ -48,7 +48,7 @@ DEVICE_CAPS = {
         'anc': 'v3pro_anc',
         'mic_eq': 'mic_eq',           # shared with V3 — same 0x97 protocol
         'mic_eq_preset': 'mic_eq_preset',
-        'audio_fn_button': None,      # V3 Pro lacks the V3-style FN button
+        'audio_fn_button': audio_function_button,      # V3 Pro lacks the V3-style FN button
         'mic_volume_uac2': True,
         'game_chat': 'game_chat_balance',
         'in_call_mix': 'in_call_audio_mix',

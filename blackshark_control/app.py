@@ -426,12 +426,16 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         if self._device is None or self._device is not dev:
             return False
         extras = ''
-        if bl and bl != '-1':
+        if bl is not None:
             try:
-                pct = round(int(bl) / 255 * 100)
-                extras = f' · battery {pct}%'
-                if ch == '1':
-                    extras += ' (charging)'
+                raw = int(bl)
+                if raw < 0:
+                    extras = f' · battery — (raw={bl})'
+                else:
+                    pct = round(raw / 255 * 100)
+                    extras = f' · battery {pct}% (raw={bl})'
+                    if ch == '1':
+                        extras += ' (charging)'
             except ValueError:
                 pass
         self._status_label.set_text(

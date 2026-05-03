@@ -57,7 +57,34 @@ if ! python3 -c 'import gi; gi.require_version("Gtk","4.0"); from gi.repository 
 fi
 
 echo "Installing to $PREFIX ..."
-$USE_SUDO $(command -v python3) -m pip install --prefix="$PREFIX" .
+# pip install flags. PEP 668 (Arch / Debian 12+ / Fedora 38+) blocks system
+# pip writes to /usr or /usr/local without --break-system-packages.
+PIP_ARGS=(--prefix="$PREFIX")
+if $USE_SUDO $(command -v python3) -m pip install --help 2>/dev/null | grep -q break-system-packages; then
+    PIP_ARGS+=(--break-system-packages)
+fi
+$USE_SUDO $(command -v python3) -m pip install "${PIP_ARGS[@]}" .
+
+# Verify the launcher will be able to import the package. /usr/local site-packages
+# isn't on the default sys.path on Arch/CachyOS, so a /usr/local install can
+# end up with a launcher script in /usr/local/bin that ImportErrors at runtime.
+PY_VER=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+if [ "$PREFIX" != "$HOME/.local" ] && [ "$PREFIX" != "/usr" ]; then
+    INSTALLED_TO="$PREFIX/lib/python$PY_VER/site-packages"
+    if ! python3 -c "import blackshark_control" 2>/dev/null; then
+        echo "WARNING: the launcher in $PREFIX/bin/blackshark-control won't find the"
+        echo "         module because $INSTALLED_TO isn't on Python's default sys.path."
+        echo "         Either run with --user, or symlink the package:"
+        echo "             sudo ln -sf $INSTALLED_TO/blackshark_control \\"
+        echo "                  /usr/lib/python$PY_VER/site-packages/blackshark_control"
+        # Apply the symlink fix automatically.
+        if [ -d "$INSTALLED_TO/blackshark_control" ] && [ -d "/usr/lib/python$PY_VER/site-packages" ]; then
+            $USE_SUDO ln -sfn "$INSTALLED_TO/blackshark_control" \
+                "/usr/lib/python$PY_VER/site-packages/blackshark_control"
+            echo "         (auto-symlinked above; rerun blackshark-control)"
+        fi
+    fi
+fi
 $USE_SUDO install -Dm644 data/blackshark-control.desktop "$PREFIX/share/applications/blackshark-control.desktop"
 $USE_SUDO install -Dm644 data/blackshark-control.svg "$PREFIX/share/icons/hicolor/scalable/apps/blackshark-control.svg"
 

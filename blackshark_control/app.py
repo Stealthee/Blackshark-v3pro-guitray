@@ -425,17 +425,15 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         # Bail if device disconnected/replaced while the worker was running.
         if self._device is None or self._device is not dev:
             return False
+        # Local-only clean format (not pushed to github — main keeps raw=N
+        # for Joe's debug). Same as pre-today commit 6f6ad6d.
         extras = ''
-        if bl is not None:
+        if bl and bl != '-1':
             try:
-                raw = int(bl)
-                if raw < 0:
-                    extras = f' · battery — (raw={bl})'
-                else:
-                    pct = round(raw / 255 * 100)
-                    extras = f' · battery {pct}% (raw={bl})'
-                    if ch == '1':
-                        extras += ' (charging)'
+                pct = round(int(bl) / 255 * 100)
+                extras = f' · battery {pct}%'
+                if ch == '1':
+                    extras += ' (charging)'
             except ValueError:
                 pass
         self._status_label.set_text(

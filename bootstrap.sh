@@ -108,9 +108,9 @@ if [ "$DO_DRIVER" = 1 ]; then
     sudo rsync -a --delete --exclude='.git' "$OPENRAZER_DIR/" "$DKMS_SRC/"
 
     step "rebuilding kernel module via DKMS"
-    sudo dkms remove "${DKMS_NAME}/${DKMS_VER}" --all 2>/dev/null || true
-    sudo dkms add    "$DKMS_SRC"
-    sudo dkms install "${DKMS_NAME}/${DKMS_VER}" --force
+    sudo dkms remove -m "${DKMS_NAME}" -v "${DKMS_VER}" --all 2>/dev/null || true
+    sudo dkms add    -m "${DKMS_NAME}" -v "${DKMS_VER}"
+    sudo dkms install -m "${DKMS_NAME}" -v "${DKMS_VER}" --force
 
     step "installing udev rules"
     ( cd "$OPENRAZER_DIR" && sudo make udev_install )

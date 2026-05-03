@@ -392,23 +392,22 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             self._device = None
 
         if self._device:
-            extras = ''
-            if self._device.has('battery'):
-                bl = self._read('battery')
-                ch = self._read('charging')
-                # charge_level is a 0..255 byte (openrazer convention); /255*100 → %.
-                if bl and bl != '-1':
-                    try:
-                        pct = round(int(bl) / 255 * 100)
-                        extras = f' · battery {pct}%'
-                        if ch == '1':
-                            extras += ' (charging)'
-                    except ValueError:
-                        pass
+            # Show device id immediately — battery extras are appended later
+            # by the async worker so we don't block the GTK main thread on
+            # sysfs reads (each can take up to 500ms in the kernel; sync
+            # reads here triggered GTK 'app-not-responding' on connect).
             self._status_label.set_text(
                 f'{self._device.name} · {self._device.pid} · '
-                f'{os.path.basename(self._device.path)}{extras}'
+                f'{os.path.basename(self._device.path)}'
             )
+            if self._device.has('battery') and not getattr(self, '_status_bat_inflight', False):
+                self._status_bat_inflight = True
+                dev = self._device
+                def _bat_worker():
+                    bl = dev.read('battery')
+                    ch = dev.read('charging')
+                    GLib.idle_add(self._status_apply_battery, dev, bl, ch)
+                threading.Thread(target=_bat_worker, daemon=True).start()
             self._status_label.remove_css_class('status-err')
             self._status_label.add_css_class('status-ok')
             self._connected_pid = self._device.pid
@@ -419,6 +418,26 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             self._connected_pid = None
         self._refresh_battery_widget()
         return True   # keep timer running
+
+    def _status_apply_battery(self, dev, bl, ch):
+        """Called from the worker thread via GLib.idle_add — runs on main."""
+        self._status_bat_inflight = False
+        # Bail if device disconnected/replaced while the worker was running.
+        if self._device is None or self._device is not dev:
+            return False
+        extras = ''
+        if bl and bl != '-1':
+            try:
+                pct = round(int(bl) / 255 * 100)
+                extras = f' · battery {pct}%'
+                if ch == '1':
+                    extras += ' (charging)'
+            except ValueError:
+                pass
+        self._status_label.set_text(
+            f'{dev.name} · {dev.pid} · {os.path.basename(dev.path)}{extras}'
+        )
+        return False  # one-shot
 
     # ── Sound tab ───────────────────────────────────────────────────────────
 

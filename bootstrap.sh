@@ -48,7 +48,10 @@ OPENRAZER_DIR="$SRC_DIR/openrazer-blackshark"
 GUI_DIR="$SRC_DIR/blackshark-control"
 
 DKMS_NAME="openrazer-driver"
-DKMS_VER="3.12.99-blackshark-fork"
+# DKMS_VER must match the Makefile's DKMS_VER and dkms.conf's PACKAGE_VERSION
+# (the openrazer-blackshark fork keeps both at the upstream 3.12.1 — the
+# fork branding is in the git branch, not the version string).
+DKMS_VER="3.12.1"
 DKMS_SRC="/usr/src/${DKMS_NAME}-${DKMS_VER}"
 
 green()  { printf "\033[32m%s\033[0m\n" "$*"; }
@@ -77,7 +80,10 @@ uninstall() {
         ( cd "$GUI_DIR" && [ -x install.sh ] && ./install.sh --uninstall || true )
     fi
     sudo dkms remove "${DKMS_NAME}/${DKMS_VER}" --all 2>/dev/null || true
-    sudo rm -rf "$DKMS_SRC"
+    # Older bootstrap installs registered as 3.12.99-blackshark-fork — clean those too.
+    sudo dkms remove "${DKMS_NAME}/3.12.99-blackshark-fork" --all 2>/dev/null || true
+    sudo rm -rf "$DKMS_SRC" "/usr/src/${DKMS_NAME}-3.12.99-blackshark-fork"
+    sudo rm -rf "/var/lib/dkms/${DKMS_NAME}/3.12.99-blackshark-fork"
     sudo rm -f /usr/lib/udev/rules.d/99-razerkraken-sysfs.rules \
                /lib/udev/rules.d/99-razerkraken-sysfs.rules
     sudo udevadm control --reload || true

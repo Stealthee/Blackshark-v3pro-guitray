@@ -104,8 +104,11 @@ if [ "$DO_DRIVER" = 1 ]; then
     clone_or_update "$OPENRAZER_REPO" "$OPENRAZER_DIR" "$BRANCH"
 
     step "syncing source into DKMS tree"
-    sudo mkdir -p "$DKMS_SRC"
-    sudo rsync -a --delete --exclude='.git' "$OPENRAZER_DIR/" "$DKMS_SRC/"
+    # Use the Makefile's setup_dkms target — it knows where dkms.conf lives
+    # (install_files/dkms/dkms.conf, not repo root) and copies just the files
+    # DKMS needs. Rsyncing the whole repo would put dkms.conf in the wrong
+    # place and DKMS install would fail with 'Could not locate dkms.conf'.
+    ( cd "$OPENRAZER_DIR" && sudo make setup_dkms )
 
     step "rebuilding kernel module via DKMS"
     # Some DKMS versions leave a half-cleaned tree after `remove --all` (the

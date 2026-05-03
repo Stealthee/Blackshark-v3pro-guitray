@@ -65,24 +65,21 @@ if $USE_SUDO $(command -v python3) -m pip install --help 2>/dev/null | grep -q b
 fi
 $USE_SUDO $(command -v python3) -m pip install "${PIP_ARGS[@]}" .
 
-# Verify the launcher will be able to import the package. /usr/local site-packages
-# isn't on the default sys.path on Arch/CachyOS, so a /usr/local install can
-# end up with a launcher script in /usr/local/bin that ImportErrors at runtime.
+# Make sure the launcher in $PREFIX/bin can find the module. On Arch/CachyOS,
+# /usr/local/lib/python$X/site-packages isn't on Python's default sys.path,
+# so /usr/local installs end up with a working pip but a broken launcher
+# (ModuleNotFoundError). Always symlink the installed package into the system
+# Python's site-packages — cheap, idempotent, fixes both Joe's and the
+# original user's reports.
 PY_VER=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
 if [ "$PREFIX" != "$HOME/.local" ] && [ "$PREFIX" != "/usr" ]; then
-    INSTALLED_TO="$PREFIX/lib/python$PY_VER/site-packages"
-    if ! python3 -c "import blackshark_control" 2>/dev/null; then
-        echo "WARNING: the launcher in $PREFIX/bin/blackshark-control won't find the"
-        echo "         module because $INSTALLED_TO isn't on Python's default sys.path."
-        echo "         Either run with --user, or symlink the package:"
-        echo "             sudo ln -sf $INSTALLED_TO/blackshark_control \\"
-        echo "                  /usr/lib/python$PY_VER/site-packages/blackshark_control"
-        # Apply the symlink fix automatically.
-        if [ -d "$INSTALLED_TO/blackshark_control" ] && [ -d "/usr/lib/python$PY_VER/site-packages" ]; then
-            $USE_SUDO ln -sfn "$INSTALLED_TO/blackshark_control" \
-                "/usr/lib/python$PY_VER/site-packages/blackshark_control"
-            echo "         (auto-symlinked above; rerun blackshark-control)"
-        fi
+    INSTALLED_TO="$PREFIX/lib/python$PY_VER/site-packages/blackshark_control"
+    SYS_SP="/usr/lib/python$PY_VER/site-packages"
+    # Test from /tmp (so the repo dir doesn't shadow the import).
+    if [ -d "$INSTALLED_TO" ] && [ -d "$SYS_SP" ] && \
+       ! ( cd /tmp && python3 -c "import blackshark_control" ) 2>/dev/null; then
+        echo "Symlinking $INSTALLED_TO → $SYS_SP/ (system sys.path doesn't include $PREFIX)"
+        $USE_SUDO ln -sfn "$INSTALLED_TO" "$SYS_SP/blackshark_control"
     fi
 fi
 $USE_SUDO install -Dm644 data/blackshark-control.desktop "$PREFIX/share/applications/blackshark-control.desktop"

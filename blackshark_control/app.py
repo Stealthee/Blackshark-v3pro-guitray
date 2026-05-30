@@ -4,7 +4,7 @@
 import gi
 gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk, GLib, Gdk, Pango
-import glob, os, subprocess, json, threading
+import glob, os, subprocess, json, threading, time
 
 SYSFS_DIR = '/sys/bus/hid/drivers/razerkraken'
 PIDS = ('0576', '0577', '057A', '0579')   # V3 Pro wired, V3 Pro 2.4GHz, V3 wireless dongle, V3 wired
@@ -403,8 +403,7 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             # Battery sysfs read triggers a 1s kernel timeout on V3 Pro wireless
             # (firmware never replies to the query; value comes via push cache).
             # Read immediately on first connect, then throttle to once per 60s.
-            import time as _time
-            _now = _time.monotonic()
+            _now = time.monotonic()
             _last = getattr(self, '_bat_last_read', 0)
             _pid_changed = getattr(self, '_bat_last_pid', None) != self._device.pid
             if self._device.has('battery') and not getattr(self, '_status_bat_inflight', False) and (_pid_changed or (_now - _last) >= 60):
@@ -434,6 +433,10 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         # Bail if device disconnected/replaced while the worker was running.
         if self._device is None or self._device is not dev:
             return False
+        # If the read failed (wireless link not up yet after hot-plug), retry
+        # in 10s instead of waiting the full 60s throttle window.
+        if not bl or bl == '-1':
+            self._bat_last_read = time.monotonic() - 50
         extras = ''
         pct = None
         if bl and bl != '-1':

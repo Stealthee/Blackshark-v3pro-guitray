@@ -400,7 +400,16 @@ class BlackSharkControl(Gtk.ApplicationWindow):
                 f'{self._device.name} · {self._device.pid} · '
                 f'{os.path.basename(self._device.path)}'
             )
-            if self._device.has('battery') and not getattr(self, '_status_bat_inflight', False):
+            # Battery sysfs read triggers a 1s kernel timeout on V3 Pro wireless
+            # (firmware never replies to the query; value comes via push cache).
+            # Read immediately on first connect, then throttle to once per 60s.
+            import time as _time
+            _now = _time.monotonic()
+            _last = getattr(self, '_bat_last_read', 0)
+            _pid_changed = getattr(self, '_bat_last_pid', None) != self._device.pid
+            if self._device.has('battery') and not getattr(self, '_status_bat_inflight', False) and (_pid_changed or (_now - _last) >= 60):
+                self._bat_last_read = _now
+                self._bat_last_pid = self._device.pid
                 self._status_bat_inflight = True
                 dev = self._device
                 def _bat_worker():

@@ -434,9 +434,8 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         # Bail if device disconnected/replaced while the worker was running.
         if self._device is None or self._device is not dev:
             return False
-        # Local-only clean format (not pushed to github — main keeps raw=N
-        # for Joe's debug). Same as pre-today commit 6f6ad6d.
         extras = ''
+        pct = None
         if bl and bl != '-1':
             try:
                 pct = round(int(bl) / 255 * 100)
@@ -448,6 +447,13 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         self._status_label.set_text(
             f'{dev.name} · {dev.pid} · {os.path.basename(dev.path)}{extras}'
         )
+        # Also push to the notebook battery widget so it doesn't need its own read loop.
+        if hasattr(self, '_bat_label'):
+            if pct is not None:
+                suffix = ' · charging' if ch == '1' else ''
+                self._bat_label.set_text(f'battery {pct}%{suffix}')
+            else:
+                self._bat_label.set_text('battery —')
         return False  # one-shot
 
     # ── Sound tab ───────────────────────────────────────────────────────────
@@ -1245,9 +1251,10 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         return outer
 
     def _refresh_battery_widget(self):
-        """Update the battery indicator parked in the notebook's action area.
-        Runs the sysfs reads on a worker thread because each can block ~2s when
-        the firmware response gate is tripped (V3 wireless on Linux)."""
+        """Update the battery indicator label in the notebook action area.
+        Data is pushed here by _status_apply_battery so no extra sysfs read
+        is needed — prevents the widget from hammering the device independently
+        of the 60s throttle on the status bar battery worker."""
         if not hasattr(self, '_bat_widget'):
             return
         if not self._device:
@@ -1256,29 +1263,8 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         if not self._device.has('battery'):
             self._bat_label.set_text('battery N/A')
             return
-        if getattr(self, '_bat_refresh_inflight', False):
-            return  # don't pile up worker threads
-        self._bat_refresh_inflight = True
+        # Leave whatever _status_apply_battery last wrote; nothing to do here.
 
-        def _worker():
-            bl = self._read('battery')
-            ch = self._read('charging')
-            GLib.idle_add(self._battery_update_done, bl, ch)
-        threading.Thread(target=_worker, daemon=True).start()
-
-    def _battery_update_done(self, bl, ch):
-        self._bat_refresh_inflight = False
-        try:
-            raw = int(bl) if bl is not None else -1
-        except ValueError:
-            raw = -1
-        if raw < 0:
-            self._bat_label.set_text('battery —')
-            return False
-        pct = round(raw / 255 * 100)
-        suffix = ' · charging' if ch == '1' else ''
-        self._bat_label.set_text(f'battery {pct}%{suffix}')
-        return False  # one-shot
 
     def _on_timeout(self, btn, t):
         for tb in self._timeout_btns.values():

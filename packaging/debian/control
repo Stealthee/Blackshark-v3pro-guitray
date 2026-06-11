@@ -7,7 +7,7 @@ Build-Depends: debhelper-compat (= 13),
                python3-all,
                python3-setuptools
 Standards-Version: 4.6.0
-Homepage: https://github.com/mehmetbayoglu/blackshark-control
+Homepage: https://github.com/Stealthee/Blackshark-v3pro-guitray
 
 Package: blackshark-control
 Architecture: all

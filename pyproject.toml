@@ -20,11 +20,11 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-tray = ["pystray", "Pillow"]
+tray = ["Pillow"]
 
 [project.urls]
-Homepage = "https://github.com/mehmetbayoglu/blackshark-control"
-"Bug Tracker" = "https://github.com/mehmetbayoglu/blackshark-control/issues"
+Homepage = "https://github.com/Stealthee/Blackshark-v3pro-guitray"
+"Bug Tracker" = "https://github.com/Stealthee/Blackshark-v3pro-guitray/issues"
 
 [project.scripts]
 blackshark-control = "blackshark_control.app:main"

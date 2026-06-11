@@ -1,0 +1,5 @@
+# Razer BlackShark V3 Pro wireless dongle — disable USB autosuspend.
+# Without this the dongle can go to sleep when idle and drop the RF link
+# to the headset.
+
+SUBSYSTEM=="usb", ATTRS{idVendor}=="1532", ATTRS{idProduct}=="0577", ATTR{power/autosuspend}="-1", ATTR{power/control}="on"

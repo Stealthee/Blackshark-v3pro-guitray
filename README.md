@@ -1,14 +1,23 @@
-# blackshark-control
+# Blackshark-v3pro-guitray
 
-GTK4 control panel for the **Razer BlackShark V3** headset on Linux. Controls the openrazer `razerkraken` driver's sysfs attributes — headphone EQ (5 profile slots, 10 bands), mic EQ with 4 presets, sidetone, and the audio function button mode.
+GTK4 control panel + system tray for the **Razer BlackShark V3 / V3 Pro** headsets on
+Linux. Controls the openrazer `razerkraken` driver's sysfs attributes — headphone EQ
+(5 profile slots, 10 bands), mic EQ with 4 presets, sidetone, THX Spatial Audio, ANC /
+Ambient mode, Ultra-Low-Latency mode, game/chat balance, in-call mix, audio prompts,
+power-save timeout, and the audio function button mode.
 
-Supports both PIDs:
-- `1532:0579` (wired USB)
-- `1532:057a` (2.4GHz dongle)
+Supports all four PIDs:
+- `1532:0579` (BlackShark V3, wired)
+- `1532:057a` (BlackShark V3, 2.4GHz dongle)
+- `1532:0576` (BlackShark V3 Pro, wired)
+- `1532:0577` (BlackShark V3 Pro, 2.4GHz dongle)
 
 ## Requirements
 
-- Linux with the openrazer kernel module that supports the BlackShark V3 (PR [openrazer/openrazer#2784](https://github.com/openrazer/openrazer/pull/2784) or later)
+- Linux with an openrazer `razerkraken` driver that supports these devices. V3 Pro
+  support isn't upstream yet — use
+  [mehmetbayoglu/openrazer, branch `blackshark-v3-pro`](https://github.com/mehmetbayoglu/openrazer/tree/blackshark-v3-pro)
+  until the upstream PR lands.
 - Python 3.9+, GTK 4, PyGObject
 - User in the `openrazer` group (added automatically when installing `openrazer-meta`)
 
@@ -17,8 +26,8 @@ Supports both PIDs:
 ### Universal (any distro)
 
 ```sh
-git clone https://github.com/mehmetbayoglu/blackshark-control.git
-cd blackshark-control
+git clone https://github.com/Stealthee/Blackshark-v3pro-guitray.git
+cd Blackshark-v3pro-guitray
 ./install.sh           # system-wide (uses sudo)
 ./install.sh --user    # ~/.local install, no sudo
 ```
@@ -56,6 +65,23 @@ sudo dnf install ~/rpmbuild/RPMS/noarch/blackshark-control-*.rpm
 # or your distro's package manager
 ```
 
+## Autostart (tray icon on login)
+
+The app starts hidden — it never pops up a window on launch — so adding it to your
+session's autostart gives you a persistent battery + quick-settings tray icon with
+nothing visible until you click it.
+
+```sh
+./install.sh --autostart
+```
+
+This installs `data/blackshark-control-autostart.desktop` to
+`~/.config/autostart/blackshark-control.desktop`. To remove it again:
+
+```sh
+rm ~/.config/autostart/blackshark-control.desktop
+```
+
 ## Usage
 
 Launch from your application menu (entry: **BlackShark V3 Control**) or run:
@@ -76,6 +102,51 @@ The status bar shows the detected device PID. If it says "Device not found", the
 Mic volume is **not** controlled here — it's standard USB Audio Class 2, use `pavucontrol` / your normal audio mixer.
 
 Per-slot custom EQ values persist in `~/.config/blackshark-control.json`.
+
+## PipeWire: separate Game / Chat audio channels
+
+The headset's hardware **Game/Chat balance** control (Sound tab / tray menu) mixes
+two separate audio streams that the V3 Pro presents over USB — "Game" and "Chat".
+By default, PipeWire's ALSA Card Profile (ACP) module doesn't know to split these
+into separate sinks for the V3 Pro's USB IDs, so you get one combined sink and the
+balance slider has nothing useful to mix.
+
+A udev rule fixes this by pointing ACP at the `usb-gaming-headset.conf` profile-set
+(already shipped by `alsa-card-profile`, used for other gaming headsets):
+
+```sh
+sudo cp udev/91-pipewire-blackshark-v3pro.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+```
+
+Unplug and replug the headset/dongle (or reboot). You should then see two sinks plus
+a chat mic input:
+
+```sh
+wpctl status | grep -i blackshark
+# or
+pactl list sinks short | grep -i blackshark
+```
+
+- **BlackShark V3 Pro Game** — set this as the output for games / desktop audio
+- **BlackShark V3 Pro Chat** — set this as the output for Discord / voice chat
+- **BlackShark V3 Pro Chat** (input) — the headset mic
+
+Set each app's output device in `pavucontrol` (Playback tab) or your DE's volume
+mixer. The headset then mixes the two streams according to the **Game/Chat balance**
+slider — fully toward "Game" mutes chat, fully toward "Chat" mutes game, center is
+50/50.
+
+### Recommended: disable USB autosuspend on the dongle
+
+If the wireless dongle drops out after sitting idle, USB autosuspend is usually why:
+
+```sh
+sudo cp udev/50-razer-blackshark-power.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules
+sudo udevadm trigger
+```
 
 ## License
 

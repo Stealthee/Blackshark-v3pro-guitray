@@ -4,7 +4,7 @@ Release:        1%{?dist}
 Summary:        GTK4 control panel for the Razer BlackShark V3 headset
 
 License:        GPL-2.0-or-later
-URL:            https://github.com/mehmetbayoglu/blackshark-control
+URL:            https://github.com/Stealthee/Blackshark-v3pro-guitray
 Source0:        %{url}/archive/refs/tags/v%{version}.tar.gz
 
 BuildArch:      noarch

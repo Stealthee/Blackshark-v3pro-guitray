@@ -17,9 +17,10 @@ for arg in "$@"; do
     case "$arg" in
         --user)        PREFIX="$HOME/.local"; USE_SUDO="" ;;
         --uninstall)   ACTION="uninstall" ;;
+        --autostart)   ACTION="autostart" ;;
         --prefix=*)    PREFIX="${arg#--prefix=}" ;;
         -h|--help)
-            echo "Usage: $0 [--user] [--uninstall] [--prefix=PATH]"
+            echo "Usage: $0 [--user] [--uninstall] [--autostart] [--prefix=PATH]"
             exit 0
             ;;
     esac
@@ -32,6 +33,14 @@ if [ "$ACTION" = "uninstall" ]; then
     $USE_SUDO rm -f "$PREFIX/share/applications/blackshark-control.desktop"
     $USE_SUDO rm -f "$PREFIX/share/icons/hicolor/scalable/apps/blackshark-control.svg"
     echo "Uninstalled."
+    exit 0
+fi
+
+if [ "$ACTION" = "autostart" ]; then
+    mkdir -p "$HOME/.config/autostart"
+    cp data/blackshark-control-autostart.desktop "$HOME/.config/autostart/blackshark-control.desktop"
+    echo "Autostart enabled — the tray icon will start on next login."
+    echo "To undo: rm ~/.config/autostart/blackshark-control.desktop"
     exit 0
 fi
 

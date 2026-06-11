@@ -19,6 +19,9 @@ classifiers = [
     "Environment :: X11 Applications :: GTK",
 ]
 
+[project.optional-dependencies]
+tray = ["pystray", "Pillow"]
+
 [project.urls]
 Homepage = "https://github.com/mehmetbayoglu/blackshark-control"
 "Bug Tracker" = "https://github.com/mehmetbayoglu/blackshark-control/issues"

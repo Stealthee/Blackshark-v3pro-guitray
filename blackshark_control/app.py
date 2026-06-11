@@ -4,7 +4,18 @@
 import gi
 gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk, GLib, Gdk, Pango
-import glob, os, subprocess, json, threading, time
+import glob, os, subprocess, json, threading, time, traceback
+
+_APP_LOG = '/tmp/bs-control.log'
+
+def _log(msg):
+    try:
+        with open(_APP_LOG, 'a') as _f:
+            _f.write(f'[{time.strftime("%H:%M:%S")}] {msg}\n')
+    except Exception:
+        pass
+
+from blackshark_control._tray import BatteryTray as _BatteryTray
 
 SYSFS_DIR = '/sys/bus/hid/drivers/razerkraken'
 PIDS = ('0576', '0577', '057A', '0579')   # V3 Pro wired, V3 Pro 2.4GHz, V3 wireless dongle, V3 wired
@@ -170,8 +181,12 @@ scale.vertical trough { min-width: 4px; min-height: 4px; }
 .status-ok { color: #00ff41; font-size: 10px; }
 .status-err { color: #ff4444; font-size: 10px; }
 .pwr-btn { background: #2a2a2a; color: #888; border: 1px solid #333; border-radius: 4px; padding: 6px 14px; }
-.pwr-btn.active { background: #003a12; color: #00ff41; border-color: #00ff41; }
+.pwr-btn.active, .pwr-btn:checked { background: #003a12; color: #00ff41; border-color: #00ff41; }
 .hex-view { background: #0d0d0d; color: #00ff41; font-family: monospace; font-size: 10px; padding: 8px; border-radius: 4px; }
+.tv-battery { font-size: 28px; font-weight: bold; }
+.tv-btn { background: #2a2a2a; color: #aaa; border: 1px solid #333; border-radius: 4px; padding: 6px 10px; font-size: 11px; }
+.tv-btn.active { background: #003a12; color: #00ff41; border-color: #00ff41; }
+.tv-step { background: #2a2a2a; color: #eee; border: 1px solid #444; border-radius: 4px; padding: 4px 14px; font-size: 14px; }
 """
 
 def sysfs_path():
@@ -220,6 +235,7 @@ class Device:
             save_state_value(self.pid, feature, value)
             return True, None
         except Exception as e:
+            _log(f'write {self.pid} {feature}={value!r} → {e}')
             return False, str(e)
 
     def read(self, feature):
@@ -272,11 +288,129 @@ def sysfs_write(attr, value):
         return False, str(e)
 
 
+class TrayView(Gtk.Window):
+    """Compact quick-settings popup — shown when tray icon is left-clicked."""
+
+    def __init__(self, ctrl):
+        super().__init__(title='BlackShark Quick')
+        self._ctrl    = ctrl
+        self._busy    = False
+        self.set_resizable(False)
+        self.set_deletable(True)
+        self.connect('close-request', lambda w: w.hide() or True)
+
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        outer.set_margin_top(14); outer.set_margin_bottom(14)
+        outer.set_margin_start(16); outer.set_margin_end(16)
+        self.set_child(outer)
+
+        # Battery
+        self._bat_lbl = Gtk.Label(label='—')
+        self._bat_lbl.add_css_class('tv-battery')
+        self._bat_lbl.set_halign(Gtk.Align.CENTER)
+        outer.append(self._bat_lbl)
+
+        outer.append(Gtk.Separator())
+
+        # Mic EQ
+        meq_lbl = Gtk.Label(label='Mic EQ')
+        meq_lbl.set_halign(Gtk.Align.START)
+        meq_lbl.add_css_class('section-label')
+        outer.append(meq_lbl)
+
+        meq_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        self._meq_btns = {}
+        for i, name in enumerate(MIC_EQ_PRESETS):
+            btn = Gtk.Button(label=name)
+            btn.add_css_class('tv-btn')
+            btn.connect('clicked', self._on_meq, i)
+            meq_row.append(btn)
+            self._meq_btns[i] = btn
+        outer.append(meq_row)
+
+        outer.append(Gtk.Separator())
+
+        # Sidetone
+        st_lbl = Gtk.Label(label='Sidetone')
+        st_lbl.set_halign(Gtk.Align.START)
+        st_lbl.add_css_class('section-label')
+        outer.append(st_lbl)
+
+        st_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        st_row.set_halign(Gtk.Align.CENTER)
+        st_minus = Gtk.Button(label='−')
+        st_minus.add_css_class('tv-step')
+        st_minus.connect('clicked', self._on_st, -1)
+        self._st_val = Gtk.Label(label='0')
+        self._st_val.set_width_chars(3)
+        self._st_val.set_halign(Gtk.Align.CENTER)
+        st_plus = Gtk.Button(label='+')
+        st_plus.add_css_class('tv-step')
+        st_plus.connect('clicked', self._on_st, +1)
+        st_row.append(st_minus); st_row.append(self._st_val); st_row.append(st_plus)
+        outer.append(st_row)
+
+        outer.append(Gtk.Separator())
+
+        # Open full window button
+        full_btn = Gtk.Button(label='Open Full Window')
+        full_btn.connect('clicked', lambda _: (self._ctrl.present(), self.hide()))
+        outer.append(full_btn)
+
+    def refresh(self):
+        pct = getattr(self._ctrl, '_last_pct', None)
+        ch  = getattr(self._ctrl, '_last_charging', False)
+        if pct is not None:
+            self._bat_lbl.set_text(f'⚡ {pct}%' if ch else f'{pct}%')
+            self._bat_lbl.set_markup(
+                f'<span foreground="{"#32c850" if ch else "#1e78ff"}">'
+                f'{"⚡ " if ch else ""}{pct}%</span>')
+        else:
+            self._bat_lbl.set_markup('<span foreground="#888">—</span>')
+
+        idx = getattr(self._ctrl, '_mic_target_idx', 0)
+        for i, btn in self._meq_btns.items():
+            if i == idx:
+                btn.add_css_class('active')
+            else:
+                btn.remove_css_class('active')
+
+        self._st_val.set_text(str(getattr(self._ctrl, '_sidetone_level', 0)))
+
+    def _on_meq(self, btn, idx):
+        ok, _ = self._ctrl._write('mic_eq_preset', str(idx))
+        if ok:
+            self._ctrl._mic_target_idx = idx
+            self._ctrl._update_tray_state()
+            self.refresh()
+
+    def _on_st(self, btn, delta):
+        cur = getattr(self._ctrl, '_sidetone_level', 0)
+        val = max(0, min(15, cur + delta))
+        ok, _ = self._ctrl._write('sidetone', str(val))
+        if ok:
+            self._ctrl._sidetone_level = val
+            self._ctrl._update_tray_state()
+            self._st_val.set_text(str(val))
+
+
+def _install_app_icon():
+    try:
+        from blackshark_control._tray import render_logo
+        base = os.path.expanduser('~/.local/share/icons/hicolor')
+        for sz in (256, 128, 48):
+            d = os.path.join(base, f'{sz}x{sz}', 'apps')
+            os.makedirs(d, exist_ok=True)
+            render_logo(sz).save(os.path.join(d, 'blackshark-control.png'))
+    except Exception as e:
+        _log(f'icon install: {e}')
+
 class BlackSharkControl(Gtk.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title='BlackShark Control')
         self.set_default_size(900, 620)
         self.set_resizable(False)
+        self.set_icon_name('blackshark-control')
 
         self._device = Device.detect()
 
@@ -344,13 +478,19 @@ class BlackSharkControl(Gtk.ApplicationWindow):
 
         self.set_title(f'{self._device.name} Control' if self._device
                        else 'BlackShark Control')
+        self.connect('close-request', self._on_close_request)
         self._refresh_status()
+        self._init_tray()
         # Load the cached EQ preset into sliders on startup.
         GLib.idle_add(self._load_cached_preset)
-        # Push cached mic-EQ band values into the slider widgets too. Skip the
-        # write-back to the device so we don't re-apply on every launch.
+        # Push cached mic-EQ band values into the slider widgets too.
         if self._has('mic_eq'):
             GLib.idle_add(lambda: (self._load_mic_sliders(self._mic_eq_values), False)[1])
+        # Resend every cached setting to the device so it matches what's
+        # shown here. Delayed so it runs after _load_cached_preset has
+        # populated self._eq_values and after razer_mount's udev-triggered
+        # driver rebind has settled.
+        GLib.timeout_add(2000, self._resync_all_settings)
 
     def _has(self, feature):
         return self._device is not None and self._device.has(feature)
@@ -373,13 +513,222 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         self._on_preset(self._preset_btns[name], name)
         return False
 
+    def _resync_all_settings(self, on_done=None):
+        """Resend every cached/current setting to the device. Used on
+        GUI/tray startup and by the manual 'Resync' action — covers cases
+        where the headset was off or disconnected when the GUI/tray first
+        loaded, so nothing got pushed to it then.
+
+        Runs on a worker thread since each HID write can block the caller
+        for up to ~750ms (driver's multi-step handshake)."""
+        if not self._device:
+            if on_done:
+                GLib.idle_add(on_done, False, 'device not found')
+            return False
+
+        def _worker():
+            if self._has('eq'):
+                profile_idx = self._eq_target_profile
+                val_str = f"{profile_idx} " + ' '.join(str(v) for v in self._eq_values)
+                eq_write = (str(profile_idx)
+                            if self._device.caps.get('eq_mode') == 'slot-only' else val_str)
+                self._write_sync('eq', eq_write)
+            if self._has('thx'):
+                self._write_sync('thx', '1' if self._thx_on else '0')
+            if self._has('ull'):
+                self._write_sync('ull', '1' if self._ull_on else '0')
+            if self._has('anc'):
+                self._write_sync('anc', f'{self._anc_mode} {self._anc_level}')
+            if self._has('game_chat'):
+                self._write_sync('game_chat', str(self._gc_balance))
+            if self._has('in_call_mix'):
+                self._write_sync('in_call_mix', str(self._in_call_mix))
+            if self._has('audio_prompts'):
+                self._write_sync('audio_prompts', '1' if self._audio_prompts else '0')
+            if self._has('sidetone'):
+                self._write_sync('sidetone', str(self._sidetone_level))
+            if self._has('mic_eq'):
+                self._write_sync('mic_eq', ' '.join(str(v) for v in self._mic_eq_values))
+            if self._has('mic_eq_preset'):
+                self._write_sync('mic_eq_preset', str(self._mic_target_idx))
+            if self._has('power_save'):
+                self._write_sync('power_save', str(self._pwr_timeout))
+            if self._has('audio_fn_button'):
+                self._write_sync('audio_fn_button', str(self._fn_mode))
+
+            if on_done:
+                GLib.idle_add(on_done, True, None)
+
+        threading.Thread(target=_worker, daemon=True).start()
+        return False
+
+    def _on_resync_clicked(self, btn=None):
+        """Manual 'Resync' trigger from the GUI button or tray menu — pushes
+        every cached setting to the device. Use this if the headset was off
+        or disconnected when the GUI/tray first loaded."""
+        if not self._device:
+            self._status_label.set_text('Resync: device not found — plug in headset/dongle')
+            return
+        self._status_label.set_text('Resyncing settings to headset…')
+        self._resync_all_settings(self._on_resync_done)
+
+    def _on_resync_done(self, ok, err):
+        if ok:
+            self._status_label.set_text('Resync complete — settings resent to headset')
+        else:
+            self._status_label.set_text(f'Resync failed: {err}')
+        return False
+
+    # ── system tray battery indicator ───────────────────────────────────────
+
+    def _on_close_request(self, win):
+        self.hide()
+        return True  # suppress destroy; window lives until tray says quit
+
+    def _init_tray(self):
+        self._tray      = _BatteryTray()
+        self._tray_view = None   # created lazily on first use
+        GLib.idle_add(lambda: self._tray.start(
+            show_cb     = self.present,
+            quit_cb     = self.get_application().quit,
+            mic_cb      = self._tray_set_mic_preset,
+            sidetone_cb = self._tray_set_sidetone,
+            anc_cb      = self._tray_set_anc,
+            ull_cb      = self._tray_set_ull,
+            activate_cb = self._tray_activate,
+            fn_cb       = self._tray_set_fn_mode,
+            eq_cb       = self._tray_set_eq_preset,
+            pwr_cb      = self._tray_set_pwr_timeout,
+            resync_cb   = self._on_resync_clicked,
+        ) or (_log('tray started') or False))
+
+    def _tray_activate(self):
+        if self._tray_view is None:
+            self._tray_view = TrayView(self)
+        self._tray_view.refresh()
+        self._tray_view.present()
+
+    def _tray_set_mic_preset(self, idx):
+        self._mic_target_idx = idx
+        # Ensure mic EQ state exists even in tray-only mode (built lazily by GUI)
+        if not hasattr(self, '_mic_eq_values'):
+            self._mic_eq_values = [0] * 10
+            self._mic_eq_apply_timer = None
+        # Load stored band values for this preset, then write bands + index to device
+        vals = self._mic_eq_custom.get(idx, list(MIC_EQ_FACTORY[idx]))
+        self._mic_eq_values = list(vals)
+        self._apply_mic_eq(idx)
+        self._update_tray_state()
+        if hasattr(self, '_mic_preset_btns'):
+            for i, b in self._mic_preset_btns.items():
+                if i == idx: b.add_css_class('active')
+                else: b.remove_css_class('active')
+            self._load_mic_sliders(vals)
+
+    def _tray_set_sidetone(self, level):
+        self._write('sidetone', str(level))
+        self._sidetone_level = level
+        self._update_tray_state()
+        if hasattr(self, '_sidetone_slider'):
+            self._sidetone_slider.handler_block_by_func(self._on_sidetone)
+            self._sidetone_slider.set_value(level)
+            self._sidetone_slider.handler_unblock_by_func(self._on_sidetone)
+        if self._tray_view is not None:
+            self._tray_view._st_val.set_text(str(level))
+
+    def _tray_set_anc(self, mode, level):
+        self._anc_mode  = mode
+        self._anc_level = level
+        self._write('anc', f'{mode} {level}')
+        self._update_tray_state()
+        if hasattr(self, '_anc_mode_btns'):
+            for m, b in self._anc_mode_btns.items():
+                if m == mode:
+                    b.add_css_class('active')
+                else:
+                    b.remove_css_class('active')
+        if hasattr(self, '_anc_lvl_btns'):
+            for lvl, b in self._anc_lvl_btns.items():
+                b.set_sensitive(mode == 1)
+                if lvl == level:
+                    b.add_css_class('active')
+                else:
+                    b.remove_css_class('active')
+
+    def _tray_set_ull(self, on):
+        self._ull_on = on
+        self._write('ull', '1' if on else '0')
+        self._update_tray_state()
+        if hasattr(self, '_ull_btn'):
+            if on:
+                self._ull_btn.set_label('Turn Off')
+                self._ull_btn.remove_css_class('toggle-off')
+                self._ull_btn.add_css_class('toggle-on')
+            else:
+                self._ull_btn.set_label('Turn On')
+                self._ull_btn.remove_css_class('toggle-on')
+                self._ull_btn.add_css_class('toggle-off')
+
+    def _tray_set_fn_mode(self, mode):
+        self._fn_mode = mode
+        self._write('audio_fn_button', str(mode))
+        self._update_tray_state()
+        if mode in self._fn_btns:
+            self._fn_btns[mode].set_active(True)
+
+    def _tray_set_eq_preset(self, idx):
+        self._eq_target_profile = idx
+        vals = self._eq_custom.get(idx, list(EQ_FACTORY[idx]))
+        self._eq_values = list(vals)
+        self._update_tray_state()
+        if hasattr(self, '_preset_btns'):
+            name = next((n for n, i in PRESET_IDX.items() if i == idx), 'Default')
+            for n, b in self._preset_btns.items():
+                if n == name: b.add_css_class('active')
+                else: b.remove_css_class('active')
+            if hasattr(self, '_update_profile_selector'):
+                self._update_profile_selector()
+            self._load_sliders(vals)
+        if self._eq_apply_timer:
+            GLib.source_remove(self._eq_apply_timer)
+        self._eq_apply_timer = GLib.timeout_add(50, self._debounced_apply)
+
+    def _update_tray_state(self):
+        self._tray.set_device_state(
+            mic_preset  = self._mic_target_idx,
+            sidetone    = self._sidetone_level,
+            anc_mode    = getattr(self, '_anc_mode',  0),
+            anc_level   = getattr(self, '_anc_level', 1),
+            ull_on      = getattr(self, '_ull_on',    False),
+            has_anc     = self._has('anc'),
+            has_ull     = self._has('ull'),
+            fn_mode     = getattr(self, '_fn_mode',   1),
+            has_fn      = self._has('audio_fn_button'),
+            eq_preset   = getattr(self, '_eq_target_profile', 0),
+            pwr_timeout = getattr(self, '_pwr_timeout', 30),
+            has_pwr     = self._has('power_save'),
+        )
+
+    def _update_tray(self, pct, charging):
+        self._last_pct      = pct
+        self._last_charging = charging
+        self._tray.update(pct, charging)
+
     # ── status bar ──────────────────────────────────────────────────────────
 
     def _status_widget(self):
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         self._status_label = Gtk.Label(label='Detecting device…')
         self._status_label.add_css_class('status-ok')
+        self._status_label.set_hexpand(True)
+        self._status_label.set_halign(Gtk.Align.START)
         box.append(self._status_label)
+        resync_btn = Gtk.Button(label='Resync to Headset')
+        resync_btn.set_tooltip_text(
+            'Resend all saved settings to the headset — use this if it was '
+            'off or disconnected when the GUI/tray loaded.')
+        resync_btn.connect('clicked', self._on_resync_clicked)
+        box.append(resync_btn)
         return box
 
     def _refresh_status(self):
@@ -406,7 +755,7 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             _now = time.monotonic()
             _last = getattr(self, '_bat_last_read', 0)
             _pid_changed = getattr(self, '_bat_last_pid', None) != self._device.pid
-            if self._device.has('battery') and not getattr(self, '_status_bat_inflight', False) and (_pid_changed or (_now - _last) >= 60):
+            if self._device.has('battery') and not getattr(self, '_status_bat_inflight', False) and (_pid_changed or (_now - _last) >= 15):
                 self._bat_last_read = _now
                 self._bat_last_pid = self._device.pid
                 self._status_bat_inflight = True
@@ -424,6 +773,7 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             self._status_label.remove_css_class('status-ok')
             self._status_label.add_css_class('status-err')
             self._connected_pid = None
+            self._update_tray(None, False)
         self._refresh_battery_widget()
         return True   # keep timer running
 
@@ -442,21 +792,42 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         if bl and bl != '-1':
             try:
                 pct = round(int(bl) / 255 * 100)
-                extras = f' · battery {pct}%'
-                if ch == '1':
-                    extras += ' (charging)'
             except ValueError:
                 pass
+
+        # The driver's charge_status is updated only when the headset sends a
+        # cls=0x2a interrupt, which happens on charger PLUG but not on UNPLUG
+        # (headset firmware limitation). Override with battery trend so the icon
+        # doesn't stay green forever after unplugging.
+        charging = ch == '1'
+        if pct is not None:
+            prev = getattr(self, '_bat_trend_prev', None)
+            prev_pid = getattr(self, '_bat_trend_pid', None)
+            if prev is not None and prev_pid == dev.pid:
+                if pct > prev:
+                    charging = True    # battery rising → definitely charging
+                elif pct < prev:
+                    charging = False   # battery falling → definitely not charging
+                # equal: trust driver's charge_status as-is
+            self._bat_trend_prev = pct
+            self._bat_trend_pid  = dev.pid
+
+        if pct is not None:
+            extras = f' · battery {pct}%'
+            if charging:
+                extras += ' (charging)'
         self._status_label.set_text(
             f'{dev.name} · {dev.pid} · {os.path.basename(dev.path)}{extras}'
         )
         # Also push to the notebook battery widget so it doesn't need its own read loop.
         if hasattr(self, '_bat_label'):
             if pct is not None:
-                suffix = ' · charging' if ch == '1' else ''
+                suffix = ' · charging' if charging else ''
                 self._bat_label.set_text(f'battery {pct}%{suffix}')
             else:
                 self._bat_label.set_text('battery —')
+        self._update_tray(pct, charging)
+        self._update_tray_state()
         return False  # one-shot
 
     # ── Sound tab ───────────────────────────────────────────────────────────
@@ -649,6 +1020,7 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             if self._eq_apply_timer:
                 GLib.source_remove(self._eq_apply_timer)
             self._eq_apply_timer = GLib.timeout_add(50, self._debounced_apply)
+            self._update_tray_state()
             return False
 
         GLib.idle_add(_finish_preset_change)
@@ -687,6 +1059,8 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         return False
 
     def _update_hex_preview(self, status=None):
+        if not hasattr(self, '_hex_label'):
+            return
         buf = bytearray(64)
         buf[0] = 0x02
         buf[2] = 0x60
@@ -802,18 +1176,18 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         if self._has('ull'):
             ull_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
             ull_card.add_css_class('card')
-            ull_lbl = Gtk.Label(label='ULTRA-LOW LATENCY')
+            ull_lbl = Gtk.Label(label='HYPERSPEED')
             ull_lbl.add_css_class('section-label')
             ull_lbl.set_halign(Gtk.Align.START)
             ull_card.append(ull_lbl)
 
-            ull_desc = Gtk.Label(label='High-speed wireless audio via Razer HyperSpeed Gen-2 dongle.\nEnabled: ~10ms latency.  Disabled: extended range & battery life.')
+            ull_desc = Gtk.Label(label='High-speed wireless audio via Razer HyperSpeed Gen-2 dongle.\nTurn On: ~10ms latency.  Turn Off: extended range & battery life.')
             ull_desc.set_wrap(True)
             ull_desc.set_halign(Gtk.Align.START)
             ull_desc.set_xalign(0)
             ull_card.append(ull_desc)
 
-            self._ull_btn = Gtk.Button(label='ON' if self._ull_on else 'OFF')
+            self._ull_btn = Gtk.Button(label='Turn Off' if self._ull_on else 'Turn On')
             self._ull_btn.add_css_class('toggle-on' if self._ull_on else 'toggle-off')
             self._ull_btn.set_halign(Gtk.Align.START)
             self._ull_btn.connect('clicked', self._on_ull_toggle)
@@ -907,11 +1281,11 @@ class BlackSharkControl(Gtk.ApplicationWindow):
     def _on_ull_toggle(self, btn):
         self._ull_on = not self._ull_on
         if self._ull_on:
-            btn.set_label('ON')
+            btn.set_label('Turn Off')
             btn.remove_css_class('toggle-off')
             btn.add_css_class('toggle-on')
         else:
-            btn.set_label('OFF')
+            btn.set_label('Turn On')
             btn.remove_css_class('toggle-on')
             btn.add_css_class('toggle-off')
         self._write('ull', '1' if self._ull_on else '0')
@@ -1073,20 +1447,22 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             fn_lbl.set_halign(Gtk.Align.START)
             fn_card.append(fn_lbl)
             fn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-            # All 4 bytes verified on-device 2026-05-03 after widening the
-            # driver's clamp from 1..2 to 0..255. Earlier "sidetone == bluetooth"
-            # confusion was the driver rejecting byte 3 with -EINVAL.
+            _group_leader = None
             for mode_val, mode_name in [
                 (0, 'Game/Chat'),
-                (1, 'Sidetone Save'),
-                (2, 'Footsteps Scaling'),
-                (3, 'Bluetooth Volume'),
+                (1, 'Mic Sidetone'),
+                (2, 'Footsteps'),
+                (3, 'Bluetooth Vol'),
             ]:
-                b = Gtk.Button(label=mode_name)
+                b = Gtk.ToggleButton(label=mode_name)
                 b.add_css_class('pwr-btn')
+                if _group_leader is None:
+                    _group_leader = b
+                else:
+                    b.set_group(_group_leader)
                 if mode_val == self._fn_mode:
-                    b.add_css_class('active')
-                b.connect('clicked', self._on_fn_button, mode_val)
+                    b.set_active(True)
+                b.connect('toggled', self._on_fn_button, mode_val)
                 fn_row.append(b)
                 self._fn_btns[mode_val] = b
             fn_card.append(fn_row)
@@ -1126,7 +1502,9 @@ class BlackSharkControl(Gtk.ApplicationWindow):
 
     def _on_sidetone(self, sl):
         val = int(round(sl.get_value()))
+        self._sidetone_level = val
         self._write('sidetone', str(val))
+        self._update_tray_state()
 
     def _load_mic_sliders(self, vals):
         self._mic_ignore_slider = True
@@ -1181,10 +1559,14 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         self._apply_mic_eq()
 
     def _on_fn_button(self, btn, mode):
-        for b in self._fn_btns.values():
-            b.remove_css_class('active')
-        btn.add_css_class('active')
-        self._write('audio_fn_button', str(mode))
+        if not btn.get_active():
+            return
+        try:
+            self._fn_mode = mode
+            self._write('audio_fn_button', str(mode))
+            self._update_tray_state()
+        except Exception:
+            _log(f'_on_fn_button mode={mode}\n{traceback.format_exc()}')
 
     # ── Power tab ───────────────────────────────────────────────────────────
 
@@ -1269,12 +1651,23 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         # Leave whatever _status_apply_battery last wrote; nothing to do here.
 
 
+    def _tray_set_pwr_timeout(self, t):
+        self._pwr_timeout = t
+        self._write('power_save', str(t))
+        self._update_tray_state()
+        if hasattr(self, '_timeout_btns'):
+            for tb in self._timeout_btns.values():
+                tb.remove_css_class('active')
+            if t in self._timeout_btns:
+                self._timeout_btns[t].add_css_class('active')
+
     def _on_timeout(self, btn, t):
         for tb in self._timeout_btns.values():
             tb.remove_css_class('active')
         btn.add_css_class('active')
         self._pwr_timeout = t
         self._write('power_save', str(t))
+        self._update_tray_state()
 
 
 class App(Gtk.Application):
@@ -1282,6 +1675,7 @@ class App(Gtk.Application):
         super().__init__(application_id='com.blackshark.control')
 
     def do_activate(self):
+        _install_app_icon()
         win = BlackSharkControl(self)
 
         provider = Gtk.CssProvider()
@@ -1291,8 +1685,6 @@ class App(Gtk.Application):
             provider,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
-
-        win.present()
 
 
 def main():

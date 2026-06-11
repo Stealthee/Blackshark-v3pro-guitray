@@ -56,6 +56,26 @@ if ! python3 -c 'import gi; gi.require_version("Gtk","4.0"); from gi.repository 
     exit 1
 fi
 
+if ! python3 -c 'import dbus' 2>/dev/null; then
+    echo "Missing dbus-python (required for system tray). Install with:"
+    need_pkg \
+        "python-dbus" \
+        "python3-dbus" \
+        "python3-dbus" \
+        "python3-dbus-python"
+    exit 1
+fi
+
+if ! python3 -c 'from PIL import Image' 2>/dev/null; then
+    echo "Missing Pillow (required for system tray). Install with:"
+    need_pkg \
+        "python-pillow" \
+        "python3-pil" \
+        "python3-pillow" \
+        "python3-Pillow"
+    exit 1
+fi
+
 echo "Installing to $PREFIX ..."
 # pip install flags. PEP 668 (Arch / Debian 12+ / Fedora 38+) blocks system
 # pip writes to /usr or /usr/local without --break-system-packages.
@@ -63,7 +83,7 @@ PIP_ARGS=(--prefix="$PREFIX")
 if $USE_SUDO $(command -v python3) -m pip install --help 2>/dev/null | grep -q break-system-packages; then
     PIP_ARGS+=(--break-system-packages)
 fi
-$USE_SUDO $(command -v python3) -m pip install "${PIP_ARGS[@]}" .
+$USE_SUDO $(command -v python3) -m pip install "${PIP_ARGS[@]}" ".[tray]"
 
 # Make sure the launcher in $PREFIX/bin can find the module. On Arch/CachyOS,
 # /usr/local/lib/python$X/site-packages isn't on Python's default sys.path,

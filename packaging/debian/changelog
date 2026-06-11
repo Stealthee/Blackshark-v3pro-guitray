@@ -1,3 +1,11 @@
+blackshark-control (0.1.1-1) unstable; urgency=medium
+
+  * Add tray "Update available" notice (checks GitHub for newer releases).
+  * Add bsupdate.sh helper to pull and reinstall in one step.
+  * Add autostart support and PipeWire game/chat channel setup docs.
+
+ -- Mehmet Bayoglu <noreply@example.com>  Thu, 11 Jun 2026 17:04:00 -0500
+
 blackshark-control (0.1.0-1) unstable; urgency=medium
 
   * Initial release.

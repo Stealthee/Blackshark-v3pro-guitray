@@ -1,7 +1,10 @@
 """KDE StatusNotifierItem tray icon — battery level + quick-settings menu."""
 
 import os
+import subprocess
 from PIL import Image, ImageDraw, ImageFont
+
+from blackshark_control._update_check import RELEASES_URL
 
 _LOG       = '/tmp/bs-tray.log'
 _FONT_PATH = '/usr/share/fonts/TTF/DejaVuSans-Bold.ttf'
@@ -34,6 +37,13 @@ def _log(msg):
             f.write(f'[{time.strftime("%H:%M:%S")}] {msg}\n')
     except Exception:
         pass
+
+def _open_url(url):
+    try:
+        subprocess.Popen(['xdg-open', url])
+    except Exception as e:
+        _log(f'open_url failed: {e}')
+    return False
 
 try:
     import dbus, dbus.service, dbus.mainloop.glib
@@ -282,7 +292,11 @@ class _MenuService(dbus.service.Object):
         if extra:
             extra = [self._sep(16)] + extra
 
-        children = dbus.Array([
+        update = []
+        if t._update_version:
+            update = [self._item(19, f'Update available: v{t._update_version}'), self._sep(12)]
+
+        children = dbus.Array(update + [
             self._item(10, 'Show Full Window'),
             self._sep(11),
             eq_menu,
@@ -292,6 +306,7 @@ class _MenuService(dbus.service.Object):
             self._sep(15),
             self._item(17, 'Resync Settings to Headset'),
             self._sep(18),
+            self._item(21, 'About'),
             self._item(20, 'Quit'),
         ], signature='v')
 
@@ -368,6 +383,10 @@ class _MenuService(dbus.service.Object):
             GLib.idle_add(t._pwr_cb, val)
         elif id == 17 and t._resync_cb:
             GLib.idle_add(t._resync_cb)
+        elif id == 19 and t._update_url:
+            GLib.idle_add(_open_url, t._update_url)
+        elif id == 21:
+            GLib.idle_add(_open_url, RELEASES_URL)
 
     @dbus.service.method(IFACE, in_signature='a(isvu)', out_signature='ai')
     def EventGroup(self, events):
@@ -507,6 +526,8 @@ class BatteryTray:
         self._has_pwr        = False
         self._resync_cb      = None
         self._tray_view_mode = False
+        self._update_version = None
+        self._update_url     = None
 
     def start(self, show_cb=None, quit_cb=None, mic_cb=None,
               sidetone_cb=None, anc_cb=None, ull_cb=None, activate_cb=None, fn_cb=None,
@@ -561,6 +582,13 @@ class BatteryTray:
         self._eq_preset   = eq_preset
         self._pwr_timeout = pwr_timeout
         self._has_pwr     = has_pwr
+        if changed and self._menu:
+            self._menu._bump()
+
+    def set_update_available(self, version, url):
+        changed = (version != self._update_version)
+        self._update_version = version
+        self._update_url     = url
         if changed and self._menu:
             self._menu._bump()
 

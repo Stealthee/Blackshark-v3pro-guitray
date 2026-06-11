@@ -5,6 +5,7 @@ import gi
 gi.require_version('Gtk', '4.0')
 from gi.repository import Gtk, GLib, Gdk, Pango
 import glob, os, subprocess, json, threading, time, traceback
+from importlib.metadata import version as _pkg_version, PackageNotFoundError
 
 _APP_LOG = '/tmp/bs-control.log'
 
@@ -16,6 +17,7 @@ def _log(msg):
         pass
 
 from blackshark_control._tray import BatteryTray as _BatteryTray
+from blackshark_control import _update_check
 
 SYSFS_DIR = '/sys/bus/hid/drivers/razerkraken'
 PIDS = ('0576', '0577', '057A', '0579')   # V3 Pro wired, V3 Pro 2.4GHz, V3 wireless dongle, V3 wired
@@ -476,6 +478,13 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         nb.set_action_widget(self._bat_widget, Gtk.PackType.END)
         self._refresh_battery_widget()
 
+        about_btn = Gtk.Button(label='About')
+        about_btn.add_css_class('flat')
+        about_btn.set_margin_start(12)
+        about_btn.set_valign(Gtk.Align.CENTER)
+        about_btn.connect('clicked', self._on_about_clicked)
+        nb.set_action_widget(about_btn, Gtk.PackType.START)
+
         self.set_title(f'{self._device.name} Control' if self._device
                        else 'BlackShark Control')
         self.connect('close-request', self._on_close_request)
@@ -491,6 +500,41 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         # populated self._eq_values and after razer_mount's udev-triggered
         # driver rebind has settled.
         GLib.timeout_add(2000, self._resync_all_settings)
+        # Check GitHub for a newer release; surfaces as a tray menu item.
+        GLib.timeout_add(3000, self._check_for_update)
+
+    def _check_for_update(self):
+        def _worker():
+            try:
+                current = _pkg_version('blackshark-control')
+            except PackageNotFoundError:
+                # Can't determine the installed version — skip rather than
+                # risk a false "Update available" (a fallback like '0.0.0'
+                # would always compare as older than any real release).
+                return
+            result = _update_check.check_for_update(current)
+            if result:
+                latest, url = result
+                GLib.idle_add(lambda: (self._tray.set_update_available(latest, url), False)[1])
+        threading.Thread(target=_worker, daemon=True).start()
+        return False
+
+    def _on_about_clicked(self, _btn):
+        try:
+            ver = _pkg_version('blackshark-control')
+        except PackageNotFoundError:
+            ver = 'unknown'
+        about = Gtk.AboutDialog()
+        about.set_transient_for(self)
+        about.set_modal(True)
+        about.set_program_name('BlackShark Control')
+        about.set_version(ver)
+        about.set_logo_icon_name('blackshark-control')
+        about.set_comments('GTK4 control panel for the Razer BlackShark V3 / V3 Pro headsets.')
+        about.set_license_type(Gtk.License.GPL_2_0)
+        about.set_website(_update_check.RELEASES_URL)
+        about.set_website_label('GitHub')
+        about.present()
 
     def _has(self, feature):
         return self._device is not None and self._device.has(feature)

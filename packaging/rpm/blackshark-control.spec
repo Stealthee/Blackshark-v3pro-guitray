@@ -1,5 +1,5 @@
 Name:           blackshark-control
-Version:        0.1.0
+Version:        0.1.1
 Release:        1%{?dist}
 Summary:        GTK4 control panel for the Razer BlackShark V3 headset
 
@@ -45,5 +45,10 @@ install -Dm644 data/blackshark-control.svg %{buildroot}%{_datadir}/icons/hicolor
 %{_datadir}/icons/hicolor/scalable/apps/blackshark-control.svg
 
 %changelog
+* Thu Jun 11 2026 Mehmet Bayoglu - 0.1.1-1
+- Add tray "Update available" notice (checks GitHub for newer releases)
+- Add bsupdate.sh helper to pull and reinstall in one step
+- Add autostart support and PipeWire game/chat channel setup docs
+
 * Sun Apr 26 2026 Mehmet Bayoglu - 0.1.0-1
 - Initial package

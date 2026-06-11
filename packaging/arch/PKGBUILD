@@ -1,6 +1,6 @@
 # Maintainer: Mehmet Bayoglu
 pkgname=blackshark-control
-pkgver=0.1.0
+pkgver=0.1.1
 pkgrel=1
 pkgdesc="GTK4 control panel for the Razer BlackShark V3 (openrazer razerkraken)"
 arch=('any')

@@ -65,6 +65,22 @@ sudo dnf install ~/rpmbuild/RPMS/noarch/blackshark-control-*.rpm
 # or your distro's package manager
 ```
 
+## Updating
+
+The tray icon checks GitHub on startup and shows an **"Update available: vX.Y.Z"**
+item at the top of its menu when a newer release exists. Clicking it opens this repo
+in your browser.
+
+To actually install the update, from inside your cloned directory:
+
+```sh
+./bsupdate.sh           # same install mode as install.sh (sudo, /usr/local)
+./bsupdate.sh --user    # if you installed with --user
+```
+
+This pulls the latest source, reinstalls, and restarts blackshark-control if it's
+currently running.
+
 ## Autostart (tray icon on login)
 
 The app starts hidden — it never pops up a window on launch — so adding it to your
@@ -147,6 +163,21 @@ sudo cp udev/50-razer-blackshark-power.rules /etc/udev/rules.d/
 sudo udevadm control --reload-rules
 sudo udevadm trigger
 ```
+
+## Releasing (maintainer note)
+
+The tray's "Update available" notice (see [Updating](#updating)) works by comparing
+the locally installed version against the `version` field in this repo's
+`pyproject.toml` on the `main` branch. **Bump `version` in `pyproject.toml` on every
+change you want users to be notified about** — without a bump, the notice won't
+appear (or won't go away) correctly.
+
+`pyproject.toml`'s `version` is the single source of truth. When you bump it, also
+update the matching version strings in:
+
+- `packaging/arch/PKGBUILD` (`pkgver=`)
+- `packaging/rpm/blackshark-control.spec` (`Version:` + add a `%changelog` entry)
+- `packaging/debian/changelog` (new entry at the top)
 
 ## License
 

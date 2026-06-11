@@ -110,6 +110,15 @@ if [ "$PREFIX" != "$HOME/.local" ] && [ "$PREFIX" != "/usr" ]; then
         echo "Symlinking $INSTALLED_TO → $SYS_SP/ (system sys.path doesn't include $PREFIX)"
         $USE_SUDO ln -sfn "$INSTALLED_TO" "$SYS_SP/blackshark_control"
     fi
+    # Same deal for the package's dist-info: without it on sys.path,
+    # importlib.metadata.version('blackshark-control') raises
+    # PackageNotFoundError, which breaks the tray's update-check.
+    if [ -d "$SYS_SP" ] && \
+       ! ( cd /tmp && python3 -c "from importlib.metadata import version; version('blackshark-control')" ) 2>/dev/null; then
+        for d in "$PREFIX/lib/python$PY_VER/site-packages"/blackshark_control-*.dist-info; do
+            [ -d "$d" ] && $USE_SUDO ln -sfn "$d" "$SYS_SP/$(basename "$d")"
+        done
+    fi
 fi
 $USE_SUDO install -Dm644 data/blackshark-control.desktop "$PREFIX/share/applications/blackshark-control.desktop"
 $USE_SUDO install -Dm644 data/blackshark-control.svg "$PREFIX/share/icons/hicolor/scalable/apps/blackshark-control.svg"

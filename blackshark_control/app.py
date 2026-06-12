@@ -858,7 +858,15 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         if pct is not None:
             prev = getattr(self, '_bat_trend_prev', None)
             prev_pid = getattr(self, '_bat_trend_pid', None)
-            if prev is not None and prev_pid == dev.pid:
+            if prev is None or prev_pid != dev.pid:
+                # No in-session baseline (just started/reconnected) — fall
+                # back to the last reading saved before the app closed, so a
+                # restart right after a battery change doesn't lose the trend.
+                try:
+                    prev = int(load_state(dev.pid).get('battery_pct'))
+                except (TypeError, ValueError):
+                    prev = None
+            if prev is not None:
                 if pct > prev:
                     charging = True    # battery rising → definitely charging
                 elif pct < prev:
@@ -866,6 +874,7 @@ class BlackSharkControl(Gtk.ApplicationWindow):
                 # equal: trust driver's charge_status as-is
             self._bat_trend_prev = pct
             self._bat_trend_pid  = dev.pid
+            save_state_value(dev.pid, 'battery_pct', pct)
 
         if pct is not None:
             extras = f' · battery {pct}%'

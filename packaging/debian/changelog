@@ -1,3 +1,9 @@
+blackshark-control (0.1.2-1) unstable; urgency=medium
+
+  * Fix battery-trend charging override not surviving an app restart.
+
+ -- Mehmet Bayoglu <noreply@example.com>  Fri, 12 Jun 2026 13:30:00 -0500
+
 blackshark-control (0.1.1-1) unstable; urgency=medium
 
   * Add tray "Update available" notice (checks GitHub for newer releases).

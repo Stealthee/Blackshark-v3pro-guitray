@@ -643,6 +643,7 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             fn_cb       = self._tray_set_fn_mode,
             eq_cb       = self._tray_set_eq_preset,
             pwr_cb      = self._tray_set_pwr_timeout,
+            gc_cb       = self._tray_set_game_chat,
             resync_cb   = self._on_resync_clicked,
         ) or (_log('tray started') or False))
 
@@ -679,6 +680,15 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             self._sidetone_slider.handler_unblock_by_func(self._on_sidetone)
         if self._tray_view is not None:
             self._tray_view._st_val.set_text(str(level))
+
+    def _tray_set_game_chat(self, val):
+        self._gc_balance = val
+        self._write('game_chat', str(val))
+        self._update_tray_state()
+        if hasattr(self, '_gc_slider'):
+            self._gc_slider.handler_block_by_func(self._on_game_chat_balance)
+            self._gc_slider.set_value(val)
+            self._gc_slider.handler_unblock_by_func(self._on_game_chat_balance)
 
     def _tray_set_anc(self, mode, level):
         self._anc_mode  = mode
@@ -751,6 +761,7 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             eq_preset   = getattr(self, '_eq_target_profile', 0),
             pwr_timeout = getattr(self, '_pwr_timeout', 30),
             has_pwr     = self._has('power_save'),
+            gc_balance  = getattr(self, '_gc_balance', 10),
         )
 
     def _update_tray(self, pct, charging):
@@ -1283,17 +1294,26 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         gc_lbl.add_css_class('section-label')
         gc_lbl.set_halign(Gtk.Align.START)
         gc_card.append(gc_lbl)
-        gc_desc = Gtk.Label(label='0 = full game · 10 = center · 20 = full chat')
+        gc_desc = Gtk.Label(label='Centered = even mix · drag toward GAME or CHAT to favor that source')
         gc_desc.set_halign(Gtk.Align.START)
         gc_desc.set_xalign(0)
         gc_card.append(gc_desc)
         gc_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        gc_row.set_valign(Gtk.Align.CENTER)
+        gc_game_lbl = Gtk.Label(label='GAME')
+        gc_game_lbl.add_css_class('value-label')
+        gc_chat_lbl = Gtk.Label(label='CHAT')
+        gc_chat_lbl.add_css_class('value-label')
         self._gc_slider = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 20, 1)
         self._gc_slider.set_value(self._gc_balance)
         self._gc_slider.set_hexpand(True)
         self._gc_slider.set_draw_value(True)
+        self._gc_slider.set_format_value_func(lambda sl, val: str(int(round(val)) - 10))
+        self._gc_slider.add_mark(10, Gtk.PositionType.BOTTOM, None)
         self._gc_slider.connect('value-changed', self._on_game_chat_balance)
+        gc_row.append(gc_game_lbl)
         gc_row.append(self._gc_slider)
+        gc_row.append(gc_chat_lbl)
         gc_card.append(gc_row)
         outer.append(gc_card)
 
@@ -1336,7 +1356,9 @@ class BlackSharkControl(Gtk.ApplicationWindow):
 
     def _on_game_chat_balance(self, sl):
         val = int(round(sl.get_value()))
+        self._gc_balance = val
         self._write('game_chat', str(val))
+        self._update_tray_state()
 
     def _on_in_call_mix(self, btn, mode):
         for b in self._ic_btns.values():
@@ -1496,7 +1518,6 @@ class BlackSharkControl(Gtk.ApplicationWindow):
                 (0, 'Game/Chat'),
                 (1, 'Mic Sidetone'),
                 (2, 'Footsteps'),
-                (3, 'Bluetooth Vol'),
             ]:
                 b = Gtk.ToggleButton(label=mode_name)
                 b.add_css_class('pwr-btn')

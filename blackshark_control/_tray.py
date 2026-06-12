@@ -12,7 +12,7 @@ _FONT_PATH = '/usr/share/fonts/TTF/DejaVuSans-Bold.ttf'
 EQ_PRESETS       = ['Default', 'Game', 'Movie', 'Music', 'Esports']
 MIC_PRESETS      = ['Default', 'Esports', 'Broadcast', 'MicBoost']
 SIDETONE_LEVELS  = [(i, str(i)) for i in range(16)]
-FN_MODES         = ['Game/Chat', 'Mic Sidetone', 'Footsteps', 'BT Volume']
+FN_MODES         = ['Game/Chat', 'Mic Sidetone', 'Footsteps']
 PWR_TIMEOUTS     = [(0, 'Never'), (15, '15 min'), (30, '30 min'), (45, '45 min'), (60, '60 min')]
 # ANC: (id_offset, mode, level, label)
 ANC_OPTIONS = [
@@ -29,6 +29,9 @@ def _anc_cur_label(mode, level):
         if m == mode and (m != 1 or l == level):
             return label
     return '?'
+
+GAME_CHAT_LEVELS       = list(range(0, 21, 2))
+SIDETONE_LEVELS_VALUES = [v for v, _ in SIDETONE_LEVELS]
 
 def _log(msg):
     try:
@@ -282,6 +285,17 @@ class _MenuService(dbus.service.Object):
             cur_fn = FN_MODES[t._fn_mode] if 0 <= t._fn_mode < len(FN_MODES) else '?'
             extra.append(self._submenu(103, f'Fn: {cur_fn}', fn_items))
 
+        # Scroll-wheel submenu — reflects whatever the Fn mode currently
+        # routes the headset's scroll wheel to.
+        if t._has_fn and t._fn_mode == 1:
+            sc_items = [self._item(141+i, _sel(str(val), val == t._sidetone))
+                        for i, val in enumerate(SIDETONE_LEVELS_VALUES)]
+            extra.append(self._submenu(106, f'Sidetone Scroll: {t._sidetone}', sc_items))
+        else:
+            gc_items = [self._item(130+i, _sel(str(val - 10), val == t._gc_balance))
+                        for i, val in enumerate(GAME_CHAT_LEVELS)]
+            extra.append(self._submenu(106, f'Game-Chat Scroll: {t._gc_balance - 10}', gc_items))
+
         # Wireless power saving — only when device supports it
         if t._has_pwr:
             pwr_items = [self._item(120+i, _sel(label, t._pwr_timeout == val))
@@ -359,6 +373,15 @@ class _MenuService(dbus.service.Object):
             t._sidetone = id - 40
             self._bump()
             GLib.idle_add(t._sidetone_cb, t._sidetone)
+        elif 130 <= id <= 140 and t._gc_cb:
+            val = GAME_CHAT_LEVELS[id - 130]
+            t._gc_balance = val
+            self._bump()
+            GLib.idle_add(t._gc_cb, val)
+        elif 141 <= id <= 156 and t._sidetone_cb:
+            t._sidetone = SIDETONE_LEVELS_VALUES[id - 141]
+            self._bump()
+            GLib.idle_add(t._sidetone_cb, t._sidetone)
         elif 60 <= id <= 65 and t._anc_cb:
             _, m, lvl, _ = ANC_OPTIONS[id - 60]
             t._anc_mode, t._anc_level = m, lvl
@@ -368,7 +391,7 @@ class _MenuService(dbus.service.Object):
             t._ull_on = not t._ull_on
             self._bump()
             GLib.idle_add(t._ull_cb, t._ull_on)
-        elif 80 <= id <= 83 and t._fn_cb:
+        elif 80 <= id <= 82 and t._fn_cb:
             t._fn_mode = int(id) - 80
             self._bump()
             GLib.idle_add(t._fn_cb, int(id) - 80)
@@ -524,6 +547,8 @@ class BatteryTray:
         self._pwr_cb         = None
         self._pwr_timeout    = 30
         self._has_pwr        = False
+        self._gc_cb          = None
+        self._gc_balance     = 10
         self._resync_cb      = None
         self._tray_view_mode = False
         self._update_version = None
@@ -531,7 +556,7 @@ class BatteryTray:
 
     def start(self, show_cb=None, quit_cb=None, mic_cb=None,
               sidetone_cb=None, anc_cb=None, ull_cb=None, activate_cb=None, fn_cb=None,
-              eq_cb=None, pwr_cb=None, resync_cb=None):
+              eq_cb=None, pwr_cb=None, gc_cb=None, resync_cb=None):
         self._show_cb     = show_cb
         self._quit_cb     = quit_cb
         self._mic_cb      = mic_cb
@@ -542,6 +567,7 @@ class BatteryTray:
         self._fn_cb       = fn_cb
         self._eq_cb       = eq_cb
         self._pwr_cb      = pwr_cb
+        self._gc_cb       = gc_cb
         self._resync_cb   = resync_cb
         if not _DBUS_OK:
             return False
@@ -563,13 +589,14 @@ class BatteryTray:
 
     def set_device_state(self, mic_preset, sidetone, anc_mode=0, anc_level=1,
                          ull_on=False, has_anc=False, has_ull=False, fn_mode=1, has_fn=False,
-                         eq_preset=0, pwr_timeout=30, has_pwr=False):
+                         eq_preset=0, pwr_timeout=30, has_pwr=False, gc_balance=10):
         changed = (mic_preset != self._mic_preset or sidetone != self._sidetone
                    or anc_mode != self._anc_mode or anc_level != self._anc_level
                    or ull_on != self._ull_on or has_anc != self._has_anc
                    or has_ull != self._has_ull or fn_mode != self._fn_mode
                    or has_fn != self._has_fn or eq_preset != self._eq_preset
-                   or pwr_timeout != self._pwr_timeout or has_pwr != self._has_pwr)
+                   or pwr_timeout != self._pwr_timeout or has_pwr != self._has_pwr
+                   or gc_balance != self._gc_balance)
         self._mic_preset  = mic_preset
         self._sidetone    = sidetone
         self._anc_mode    = anc_mode
@@ -582,6 +609,7 @@ class BatteryTray:
         self._eq_preset   = eq_preset
         self._pwr_timeout = pwr_timeout
         self._has_pwr     = has_pwr
+        self._gc_balance  = gc_balance
         if changed and self._menu:
             self._menu._bump()
 

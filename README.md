@@ -179,6 +179,12 @@ update the matching version strings in:
 - `packaging/rpm/blackshark-control.spec` (`Version:` + add a `%changelog` entry)
 - `packaging/debian/changelog` (new entry at the top)
 
+## Credits
+
+This project started as a fork of
+[mehmetbayoglu/blackshark-control](https://github.com/mehmetbayoglu/blackshark-control) —
+thanks for the original groundwork that made this possible.
+
 ## License
 
 GPL-2.0-or-later. See [LICENSE](LICENSE).

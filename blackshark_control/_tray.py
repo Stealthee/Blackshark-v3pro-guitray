@@ -33,6 +33,13 @@ def _anc_cur_label(mode, level):
 GAME_CHAT_LEVELS       = list(range(0, 21, 2))
 SIDETONE_LEVELS_VALUES = [v for v, _ in SIDETONE_LEVELS]
 
+def _gc_label(n):
+    if n < 0:
+        return f'C {-n}'
+    if n > 0:
+        return f'G {n}'
+    return '0'
+
 def _log(msg):
     try:
         with open(_LOG, 'a') as f:
@@ -292,9 +299,9 @@ class _MenuService(dbus.service.Object):
                         for i, val in enumerate(SIDETONE_LEVELS_VALUES)]
             extra.append(self._submenu(106, f'Sidetone Scroll: {t._sidetone}', sc_items))
         else:
-            gc_items = [self._item(130+i, _sel(str(val - 10), val == t._gc_balance))
+            gc_items = [self._item(130+i, _sel(_gc_label(val - 10), val == t._gc_balance))
                         for i, val in enumerate(GAME_CHAT_LEVELS)]
-            extra.append(self._submenu(106, f'Game-Chat Scroll: {t._gc_balance - 10}', gc_items))
+            extra.append(self._submenu(106, f'Game-Chat Scroll: {_gc_label(t._gc_balance - 10)}', gc_items))
 
         # Wireless power saving — only when device supports it
         if t._has_pwr:

@@ -441,6 +441,11 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         eq_state = (self._device.state.get('eq', '') if self._device else '').split()
         try: self._eq_target_profile = int(eq_state[0]) if eq_state else 0
         except ValueError: self._eq_target_profile = 0
+        # Last active-preset value the *device* reported. Live-sync only moves
+        # the green highlight when this actually changes (a real on-headset
+        # switch), so clicking a profile in the GUI isn't reverted a poll later
+        # by the device still reporting the previous active slot.
+        self._last_eq_device_preset = -1
         # Power-save timeout in minutes. 0 = "Never sleep" (a valid choice, not
         # disabled state — the toggle was UX bloat that conflated this).
         self._pwr_timeout = _int('power_save', 30)
@@ -455,6 +460,11 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         self._sidetone_level = _int('sidetone', 0)
         self._mic_target_idx = _int('mic_eq_preset', 0)
         self._fn_mode        = _int('audio_fn_button', 1)
+        # When True, a widget is being updated programmatically to mirror an
+        # on-board (headset button/dial) change — its own change handler must
+        # NOT write the value back to the device (that would be a feedback loop).
+        self._syncing = False
+        self._sync_inflight = False
 
         # status refresh
         GLib.timeout_add(2000, self._refresh_status)
@@ -488,8 +498,8 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         self.set_title(f'{self._device.name} Control' if self._device
                        else 'BlackShark Control')
         self.connect('close-request', self._on_close_request)
-        self._refresh_status()
         self._init_tray()
+        self._refresh_status()
         # Load the cached EQ preset into sliders on startup.
         GLib.idle_add(self._load_cached_preset)
         # Push cached mic-EQ band values into the slider widgets too.
@@ -500,6 +510,10 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         # populated self._eq_values and after razer_mount's udev-triggered
         # driver rebind has settled.
         GLib.timeout_add(2000, self._resync_all_settings)
+        # live sync: reflect on-board (headset button) changes in the UI.
+        # Polls only the driver's cached attrs (no device query → no blocking),
+        # so it's safe to run frequently on the wireless link.
+        GLib.timeout_add(700, self._live_sync)
         # Check GitHub for a newer release; surfaces as a tray menu item.
         GLib.timeout_add(3000, self._check_for_update)
 
@@ -622,6 +636,149 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         else:
             self._status_label.set_text(f'Resync failed: {err}')
         return False
+
+    # ── live sync (on-board button changes → UI) ─────────────────────────────
+    # Only cache-backed attrs are polled here. Reading these returns the value
+    # the driver's raw_event cached from the headset's spontaneous pushes — no
+    # HID command is sent, so it never disturbs the wireless link. thx/ull/
+    # battery are intentionally excluded: reading them issues a blocking GET.
+    # sidetone re-added 2026-07-21 now that razer_attr_read_v3pro_sidetone is
+    # a pure cache read driver-side (was a blocking active query, same
+    # anti-pattern the old charge_status bug had — fixed the same way).
+    # anc re-added 2026-07-21 now that the driver caches on-board ANC-button
+    # pushes too (verified on hardware: pushes arrive on class 0x12, not the
+    # 0x92 SET class).
+    _SYNC_FEATURES = ('sidetone', 'game_chat', 'in_call_mix', 'audio_fn_button',
+                      'audio_prompts', 'mic_eq_preset', 'eq', 'anc')
+
+    @staticmethod
+    def _sync_int(raw):
+        """First token of a sysfs value as int, or None if unset ('-1')/garbage."""
+        if raw is None:
+            return None
+        tok = raw.split()
+        if not tok:
+            return None
+        try:
+            v = int(tok[0])
+        except ValueError:
+            return None
+        return None if v < 0 else v
+
+    def _live_sync(self):
+        if not self._device or self._sync_inflight:
+            return True
+        self._sync_inflight = True
+        dev = self._device
+        def _worker():
+            vals = {f: dev.read(f) for f in self._SYNC_FEATURES if dev.has(f)}
+            GLib.idle_add(self._apply_live_sync, dev, vals)
+        threading.Thread(target=_worker, daemon=True).start()
+        return True   # keep timer running
+
+    def _apply_live_sync(self, dev, vals):
+        self._sync_inflight = False
+        if self._device is not dev:
+            return False
+        self._syncing = True
+        try:
+            v = self._sync_int(vals.get('sidetone'))
+            if v is not None and getattr(self, '_sidetone_slider', None) and v != self._sidetone_level:
+                self._sidetone_level = v
+                self._sidetone_slider.set_value(v)
+
+            v = self._sync_int(vals.get('game_chat'))
+            if v is not None and getattr(self, '_gc_slider', None) and v != self._gc_balance:
+                self._gc_balance = v
+                self._gc_slider.set_value(v)
+
+            v = self._sync_int(vals.get('in_call_mix'))
+            if v is not None and v != self._in_call_mix and v in getattr(self, '_ic_btns', {}):
+                self._in_call_mix = v
+                for b in self._ic_btns.values():
+                    b.remove_css_class('active')
+                self._ic_btns[v].add_css_class('active')
+
+            v = self._sync_int(vals.get('audio_fn_button'))
+            if v is not None and v != self._fn_mode and v in getattr(self, '_fn_btns', {}):
+                self._fn_mode = v
+                self._fn_btns[v].set_active(True)
+
+            v = self._sync_int(vals.get('audio_prompts'))
+            if v is not None and getattr(self, '_ap_btn', None) and (v == 1) != self._audio_prompts:
+                self._audio_prompts = (v == 1)
+                self._ap_btn.set_label('ON' if self._audio_prompts else 'OFF')
+                self._ap_btn.remove_css_class('toggle-off' if self._audio_prompts else 'toggle-on')
+                self._ap_btn.add_css_class('toggle-on' if self._audio_prompts else 'toggle-off')
+
+            v = self._sync_int(vals.get('mic_eq_preset'))
+            if v is not None and v != self._mic_target_idx and v in getattr(self, '_mic_preset_btns', {}):
+                self._sync_mic_preset(v)
+
+            anc_raw = vals.get('anc')
+            if anc_raw:
+                tok = anc_raw.split()
+                if len(tok) >= 2:
+                    try:
+                        m, lvl = int(tok[0]), int(tok[1])
+                    except ValueError:
+                        m = lvl = None
+                    if m is not None and (m != self._anc_mode or lvl != self._anc_level):
+                        self._sync_anc(m, lvl)
+
+            v = self._sync_int(vals.get('eq'))
+            if v is not None and v != self._last_eq_device_preset:
+                # Only react to a genuine device-side change, not to the device
+                # echoing back the slot we just wrote.
+                self._last_eq_device_preset = v
+                if v != self._eq_target_profile:
+                    self._sync_eq_preset(v)
+        finally:
+            self._syncing = False
+        return False   # one-shot (idle_add)
+
+    def _sync_eq_preset(self, idx):
+        """Mirror an on-board headphone-EQ preset switch. Highlights the preset
+        and loads its bands into the sliders WITHOUT writing back to the device."""
+        name = next((n for n, i in PRESET_IDX.items() if i == idx), None)
+        if name is None:
+            return   # custom slot with no preset button in this fork — nothing to highlight
+        for b in self._preset_btns.values():
+            b.remove_css_class('active')
+        self._preset_btns[name].add_css_class('active')
+        self._eq_target_profile = idx
+        self._load_sliders(self._eq_custom.get(idx, list(EQ_FACTORY[idx])))
+        self._update_hex_preview()
+        self._update_tray_state()
+
+    def _sync_anc(self, mode, level):
+        """Mirror an on-board ANC button press (highlight only, no write-back —
+        _anc_mode_btns/_anc_lvl_btns are plain Gtk.Button with manual CSS
+        toggling, not ToggleButtons, so there's no signal to feed back into)."""
+        self._anc_mode = mode
+        self._anc_level = level
+        if hasattr(self, '_anc_mode_btns'):
+            for m, b in self._anc_mode_btns.items():
+                if m == mode:
+                    b.add_css_class('active')
+                else:
+                    b.remove_css_class('active')
+        if hasattr(self, '_anc_lvl_btns'):
+            for lvl, b in self._anc_lvl_btns.items():
+                b.set_sensitive(mode == 1)
+                if lvl == level:
+                    b.add_css_class('active')
+                else:
+                    b.remove_css_class('active')
+        self._update_tray_state()
+
+    def _sync_mic_preset(self, idx):
+        """Mirror an on-board mic-EQ preset switch (highlight + load bands)."""
+        for b in self._mic_preset_btns.values():
+            b.remove_css_class('active')
+        self._mic_preset_btns[idx].add_css_class('active')
+        self._mic_target_idx = idx
+        self._load_mic_sliders(self._mic_eq_custom.get(idx, list(MIC_EQ_FACTORY[idx])))
 
     # ── system tray battery indicator ───────────────────────────────────────
 
@@ -1364,12 +1521,16 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         self._write('ull', '1' if self._ull_on else '0')
 
     def _on_game_chat_balance(self, sl):
+        if self._syncing:
+            return
         val = int(round(sl.get_value()))
         self._gc_balance = val
         self._write('game_chat', str(val))
         self._update_tray_state()
 
     def _on_in_call_mix(self, btn, mode):
+        if self._syncing:
+            return
         for b in self._ic_btns.values():
             b.remove_css_class('active')
         btn.add_css_class('active')
@@ -1527,6 +1688,7 @@ class BlackSharkControl(Gtk.ApplicationWindow):
                 (0, 'Game/Chat'),
                 (1, 'Mic Sidetone'),
                 (2, 'Footsteps'),
+                (3, 'Bluetooth Volume'),
             ]:
                 b = Gtk.ToggleButton(label=mode_name)
                 b.add_css_class('pwr-btn')
@@ -1563,6 +1725,8 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         return outer
 
     def _on_audio_prompts(self, btn):
+        if self._syncing:
+            return
         self._audio_prompts = not self._audio_prompts
         if self._audio_prompts:
             btn.set_label('ON')
@@ -1575,6 +1739,8 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         self._write('audio_prompts', '1' if self._audio_prompts else '0')
 
     def _on_sidetone(self, sl):
+        if self._syncing:
+            return
         val = int(round(sl.get_value()))
         self._sidetone_level = val
         self._write('sidetone', str(val))
@@ -1634,6 +1800,8 @@ class BlackSharkControl(Gtk.ApplicationWindow):
 
     def _on_fn_button(self, btn, mode):
         if not btn.get_active():
+            return
+        if self._syncing:
             return
         try:
             self._fn_mode = mode

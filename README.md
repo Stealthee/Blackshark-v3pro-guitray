@@ -53,7 +53,8 @@ sudo dpkg -i ../blackshark-control_*.deb
 ### Fedora / RHEL
 
 ```sh
-sudo dnf install rpm-build python3-devel python3-setuptools python3-pip python3-wheel
+sudo dnf install rpm-build python3-devel pyproject-rpm-macros python3-setuptools python3-pip python3-wheel
+git archive --format=tar.gz --prefix=Blackshark-v3pro-guitray-0.1.2/ -o ../v0.1.2.tar.gz HEAD
 rpmbuild -bb --define "_sourcedir $PWD/.." packaging/rpm/blackshark-control.spec
 sudo dnf install ~/rpmbuild/RPMS/noarch/blackshark-control-*.rpm
 ```

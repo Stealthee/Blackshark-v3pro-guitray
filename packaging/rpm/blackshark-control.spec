@@ -9,6 +9,7 @@ Source0:        %{url}/archive/refs/tags/v%{version}.tar.gz
 
 BuildArch:      noarch
 BuildRequires:  python3-devel
+BuildRequires:  pyproject-rpm-macros
 BuildRequires:  python3-setuptools
 BuildRequires:  python3-pip
 BuildRequires:  python3-wheel
@@ -25,13 +26,13 @@ mic EQ presets, sidetone, and audio function button mode controls via
 the openrazer razerkraken driver's sysfs interface.
 
 %prep
-%autosetup -n %{name}-%{version}
+%autosetup -n Blackshark-v3pro-guitray-%{version}
 
 %build
-%py3_build
+%pyproject_wheel
 
 %install
-%py3_install
+%pyproject_install
 install -Dm644 data/blackshark-control.desktop %{buildroot}%{_datadir}/applications/blackshark-control.desktop
 install -Dm644 data/blackshark-control.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/blackshark-control.svg
 
@@ -40,7 +41,7 @@ install -Dm644 data/blackshark-control.svg %{buildroot}%{_datadir}/icons/hicolor
 %doc README.md
 %{_bindir}/blackshark-control
 %{python3_sitelib}/blackshark_control/
-%{python3_sitelib}/blackshark_control-*.egg-info/
+%{python3_sitelib}/blackshark_control-*.dist-info/
 %{_datadir}/applications/blackshark-control.desktop
 %{_datadir}/icons/hicolor/scalable/apps/blackshark-control.svg
 

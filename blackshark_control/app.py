@@ -184,7 +184,6 @@ scale.vertical trough { min-width: 4px; min-height: 4px; }
 .status-err { color: #ff4444; font-size: 10px; }
 .pwr-btn { background: #2a2a2a; color: #888; border: 1px solid #333; border-radius: 4px; padding: 6px 14px; }
 .pwr-btn.active, .pwr-btn:checked { background: #003a12; color: #00ff41; border-color: #00ff41; }
-.hex-view { background: #0d0d0d; color: #00ff41; font-family: monospace; font-size: 10px; padding: 8px; border-radius: 4px; }
 .tv-battery { font-size: 28px; font-weight: bold; }
 .tv-btn { background: #2a2a2a; color: #aaa; border: 1px solid #333; border-radius: 4px; padding: 6px 10px; font-size: 11px; }
 .tv-btn.active { background: #003a12; color: #00ff41; border-color: #00ff41; }
@@ -748,7 +747,6 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         self._preset_btns[name].add_css_class('active')
         self._eq_target_profile = idx
         self._load_sliders(self._eq_custom.get(idx, list(EQ_FACTORY[idx])))
-        self._update_hex_preview()
         self._update_tray_state()
 
     def _sync_anc(self, mode, level):
@@ -1164,13 +1162,6 @@ class BlackSharkControl(Gtk.ApplicationWindow):
 
         eq_card.append(slider_row)
 
-        # hex preview
-        self._hex_label = Gtk.Label(label='hex: (not connected)')
-        self._hex_label.add_css_class('hex-view')
-        self._hex_label.set_halign(Gtk.Align.START)
-        self._hex_label.set_selectable(True)
-        eq_card.append(self._hex_label)
-
         # reset to factory defaults button (bottom middle)
         reset_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         reset_row.set_halign(Gtk.Align.CENTER)
@@ -1269,7 +1260,6 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         self._eq_val_labels[idx].set_text(f'{v:+d}' if v != 0 else '0')
         for b in self._preset_btns.values():
             b.remove_css_class('active')
-        self._update_hex_preview()
         if self._eq_apply_timer:
             GLib.source_remove(self._eq_apply_timer)
         self._eq_apply_timer = GLib.timeout_add(300, self._debounced_apply)
@@ -1278,66 +1268,6 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         self._eq_apply_timer = None
         self._apply_eq()
         return False
-
-    def _update_hex_preview(self, status=None):
-        if not hasattr(self, '_hex_label'):
-            return
-        buf = bytearray(64)
-        buf[0] = 0x02
-        buf[2] = 0x60
-        buf[6] = 0x0f
-        buf[9] = 0x80 if getattr(self, '_connected_pid', None) != '0579' else 0x00
-        buf[10] = 0x95
-        buf[12] = 0x0b
-        buf[13] = self._eq_target_profile
-        for i, v in enumerate(self._eq_values):
-            buf[14 + i] = (0x80 | (-v)) if v < 0 else v
-        crc = 0
-        for b in buf[:62]:
-            crc ^= b
-        buf[62] = crc
-        hex_str = ' '.join(f'{b:02x}' for b in buf[:24]) + ' ...'
-        sysfs_cmd = f"{self._eq_target_profile} " + ' '.join(str(v) for v in self._eq_values)
-        profile_names = ['Default', 'Game', 'Movie', 'Music', 'Esports']
-        pname = profile_names[self._eq_target_profile]
-        lines = [
-            f'0x95 cmd (profile={self._eq_target_profile} {pname}): {hex_str}',
-            f'bands[0..9]: {" ".join(str(v) for v in self._eq_values)}',
-            f'sysfs: "{sysfs_cmd}"',
-        ]
-        if status:
-            lines.append(status)
-        self._hex_label.set_text('\n'.join(lines))
-
-    def _update_mic_hex_preview(self, status=None):
-        if not hasattr(self, '_mic_hex_label'):
-            return
-        # Mic EQ uses cmd 0x97 with 10 sign-magnitude band gains at buf[13..22].
-        # Frequencies 31/63/125/250/500/1k/2k/4k/8k/16k Hz.
-        buf = bytearray(64)
-        buf[0] = 0x02
-        buf[2] = 0x60
-        buf[6] = 0x0e
-        buf[9] = 0x80 if getattr(self, '_connected_pid', None) != '0579' else 0x00
-        buf[10] = 0x97
-        buf[12] = 0x0a
-        for i, v in enumerate(self._mic_eq_values):
-            buf[13 + i] = (0x80 | (-v)) if v < 0 else v
-        crc = 0
-        for b in buf[:62]:
-            crc ^= b
-        buf[62] = crc
-        hex_str = ' '.join(f'{b:02x}' for b in buf[:24]) + ' ...'
-        sysfs_cmd = ' '.join(str(v) for v in self._mic_eq_values)
-        preset_name = MIC_EQ_PRESETS[self._mic_target_idx] if 0 <= self._mic_target_idx < len(MIC_EQ_PRESETS) else '?'
-        lines = [
-            f'0x97 cmd (preset={self._mic_target_idx} {preset_name}): {hex_str}',
-            f'bands[0..9]: {" ".join(str(v) for v in self._mic_eq_values)}',
-            f'sysfs: "{sysfs_cmd}"',
-        ]
-        if status:
-            lines.append(status)
-        self._mic_hex_label.set_text('\n'.join(lines))
 
     def _update_profile_selector(self):
         for idx, btn in self._profile_sel_btns.items():
@@ -1356,8 +1286,6 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             profile_idx = self._eq_target_profile
         val_str = f"{profile_idx} " + ' '.join(str(v) for v in self._eq_values)
         snapshot_vals = list(self._eq_values)
-        profile_names = ['Default', 'Game', 'Movie', 'Music', 'Esports']
-        pname = profile_names[profile_idx]
 
         # Run the sysfs write on a worker thread — the driver's 5-step HID
         # sequence blocks the caller for ~750ms (4 inter-write msleep(150)).
@@ -1367,15 +1295,11 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         write_val = (str(profile_idx) if self._device and self._device.caps.get('eq_mode') == 'slot-only'
                      else val_str)
         def _worker():
-            ok, err = self._write_sync('eq', write_val)
+            ok, _err = self._write_sync('eq', write_val)
             def _on_done():
                 if ok:
                     self._eq_custom[profile_idx] = snapshot_vals
                     save_eq_config(self._eq_custom)
-                    status = f'→ Written to slot {profile_idx} ({pname})'
-                else:
-                    status = f'→ Write failed: {err}'
-                self._update_hex_preview(status=status)
                 return False
             GLib.idle_add(_on_done)
 
@@ -1654,24 +1578,15 @@ class BlackSharkControl(Gtk.ApplicationWindow):
                 self._mic_eq_val_labels.append(val_lbl)
             meq_card.append(meq_row)
 
-            # Bottom row: hex preview on the left, reset button on the right.
-            bottom_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-            bottom_row.set_margin_top(4)
-            self._mic_hex_label = Gtk.Label(label='hex: (not connected)')
-            self._mic_hex_label.add_css_class('hex-view')
-            self._mic_hex_label.set_halign(Gtk.Align.START)
-            self._mic_hex_label.set_hexpand(True)
-            self._mic_hex_label.set_selectable(True)
-            bottom_row.append(self._mic_hex_label)
-
+            reset_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            reset_row.set_halign(Gtk.Align.CENTER)
+            reset_row.set_margin_top(4)
             meq_reset_btn = Gtk.Button(label='Reset to Default Values')
             meq_reset_btn.add_css_class('preset-btn')
-            meq_reset_btn.set_valign(Gtk.Align.END)
             meq_reset_btn.connect('clicked', self._on_mic_reset_to_factory)
-            bottom_row.append(meq_reset_btn)
-            meq_card.append(bottom_row)
+            reset_row.append(meq_reset_btn)
+            meq_card.append(reset_row)
             outer.append(meq_card)
-            self._update_mic_hex_preview()
 
         # Audio function button mode — V3 only
         self._fn_btns = {}
@@ -1753,20 +1668,15 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             self._mic_eq_val_labels[i].set_text(f'{vals[i]:+d}' if vals[i] != 0 else '0')
         self._mic_ignore_slider = False
         self._mic_eq_values = list(vals)
-        self._update_mic_hex_preview()
 
     def _apply_mic_eq(self, idx=None):
         if idx is None:
             idx = self._mic_target_idx
-        ok, err = self._write('mic_eq', ' '.join(str(v) for v in self._mic_eq_values))
+        ok, _err = self._write('mic_eq', ' '.join(str(v) for v in self._mic_eq_values))
         if ok:
             self._mic_eq_custom[idx] = list(self._mic_eq_values)
             save_mic_eq_config(self._mic_eq_custom)
-            status = f'→ Written to mic preset {idx}'
-        else:
-            status = f'→ Write failed: {err}'
         self._write('mic_eq_preset', str(idx))
-        self._update_mic_hex_preview(status=status)
 
     def _on_mic_preset(self, btn, idx):
         for b in self._mic_preset_btns.values():
@@ -1784,7 +1694,6 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         v = int(round(sl.get_value()))
         self._mic_eq_values[idx] = v
         self._mic_eq_val_labels[idx].set_text(f'{v:+d}' if v != 0 else '0')
-        self._update_mic_hex_preview()
         if self._mic_eq_apply_timer:
             GLib.source_remove(self._mic_eq_apply_timer)
         self._mic_eq_apply_timer = GLib.timeout_add(300, self._mic_eq_debounced_apply)

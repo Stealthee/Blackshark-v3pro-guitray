@@ -8,3 +8,10 @@ dist/
 *.tar.gz
 .venv/
 venv/
+
+# Local-only notes and protocol-probing scratch scripts — not for the shared repo
+README.md
+CLAUDE_NOTES.md
+pair_v3pro.py
+probe_dongle.py
+hidraw_*.py

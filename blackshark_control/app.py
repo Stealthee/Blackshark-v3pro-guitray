@@ -175,6 +175,7 @@ scale.vertical trough { min-width: 4px; min-height: 4px; }
 .freq-label { color: #888; font-size: 9px; }
 .db-label { color: #555; font-size: 9px; }
 .value-label { color: #00ff41; font-size: 10px; font-weight: bold; }
+.sn-label { color: #00ff41; font-size: 15px; font-weight: bold; }
 .preset-btn { background: #2a2a2a; color: #aaa; border: 1px solid #333; border-radius: 4px; padding: 6px 10px; font-size: 11px; }
 .preset-btn:hover { background: #333; color: #eee; }
 .preset-btn.active { background: #003a12; color: #00ff41; border-color: #00ff41; }
@@ -484,7 +485,8 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         self._bat_widget.set_margin_end(12)
         self._bat_widget.set_valign(Gtk.Align.CENTER)
         self._sn_label = Gtk.Label(label='')
-        self._sn_label.add_css_class('db-label')
+        self._sn_label.add_css_class('sn-label')
+        self._sn_label.set_margin_end(60)
         self._bat_widget.append(self._sn_label)
         self._bat_label = Gtk.Label(label='')
         self._bat_label.add_css_class('value-label')

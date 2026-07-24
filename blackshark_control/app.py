@@ -175,7 +175,7 @@ scale.vertical trough { min-width: 4px; min-height: 4px; }
 .freq-label { color: #888; font-size: 9px; }
 .db-label { color: #555; font-size: 9px; }
 .value-label { color: #00ff41; font-size: 10px; font-weight: bold; }
-.sn-label { color: #00ff41; font-size: 15px; font-weight: bold; }
+.sn-label { color: #ffffff; font-size: 15px; font-weight: bold; }
 .preset-btn { background: #2a2a2a; color: #aaa; border: 1px solid #333; border-radius: 4px; padding: 6px 10px; font-size: 11px; }
 .preset-btn:hover { background: #333; color: #eee; }
 .preset-btn.active { background: #003a12; color: #00ff41; border-color: #00ff41; }
@@ -1015,7 +1015,7 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         if self._device is None or self._device is not dev:
             return False
         if sn and sn != '-1' and hasattr(self, '_sn_label'):
-            self._sn_label.set_text(f'SN:{sn}')
+            self._sn_label.set_text(f'Serial:    {sn}')
             self._sn_resolved = True
         # If the read failed (wireless link not up yet after hot-plug), retry
         # in 10s instead of waiting the full 60s throttle window.

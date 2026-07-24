@@ -44,6 +44,7 @@ DEVICE_CAPS = {
         'game_chat': 'game_chat_balance',
         'in_call_mix': 'in_call_audio_mix',
         'audio_prompts': 'audio_prompts',
+        'serial': 'device_serial',
     },
     # V3 wired
     '0579': None,   # filled below — same as 057A minus ull/power_save/battery
@@ -66,6 +67,7 @@ DEVICE_CAPS = {
         'game_chat': 'game_chat_balance',
         'in_call_mix': 'in_call_audio_mix',
         'audio_prompts': 'audio_prompts',
+        'serial': 'device_serial',
     },
 }
 # V3 wired: same as wireless but no power-save / ULL (those need the dongle's
@@ -481,6 +483,9 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         self._bat_widget = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         self._bat_widget.set_margin_end(12)
         self._bat_widget.set_valign(Gtk.Align.CENTER)
+        self._sn_label = Gtk.Label(label='')
+        self._sn_label.add_css_class('db-label')
+        self._bat_widget.append(self._sn_label)
         self._bat_label = Gtk.Label(label='')
         self._bat_label.add_css_class('value-label')
         self._bat_widget.append(self._bat_label)
@@ -965,15 +970,26 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             _now = time.monotonic()
             _last = getattr(self, '_bat_last_read', 0)
             _pid_changed = getattr(self, '_bat_last_pid', None) != self._device.pid
+            if _pid_changed:
+                # Different device than last tick — its serial (if any) needs
+                # re-resolving rather than keeping the previous device's SN.
+                self._sn_resolved = False
+                if hasattr(self, '_sn_label'):
+                    self._sn_label.set_text('')
             if self._device.has('battery') and not getattr(self, '_status_bat_inflight', False) and (_pid_changed or (_now - _last) >= 15):
                 self._bat_last_read = _now
                 self._bat_last_pid = self._device.pid
                 self._status_bat_inflight = True
                 dev = self._device
+                # Serial never changes once resolved, so only keep asking for
+                # it (piggybacked on this same throttled worker, not a
+                # separate poll) until it's been read successfully once.
+                need_serial = dev.has('serial') and not getattr(self, '_sn_resolved', False)
                 def _bat_worker():
                     bl = dev.read('battery')
                     ch = dev.read('charging')
-                    GLib.idle_add(self._status_apply_battery, dev, bl, ch)
+                    sn = dev.read('serial') if need_serial else None
+                    GLib.idle_add(self._status_apply_battery, dev, bl, ch, sn)
                 threading.Thread(target=_bat_worker, daemon=True).start()
             self._status_label.remove_css_class('status-err')
             self._status_label.add_css_class('status-ok')
@@ -983,16 +999,22 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             self._status_label.remove_css_class('status-ok')
             self._status_label.add_css_class('status-err')
             self._connected_pid = None
+            self._sn_resolved = False
+            if hasattr(self, '_sn_label'):
+                self._sn_label.set_text('')
             self._update_tray(None, False)
         self._refresh_battery_widget()
         return True   # keep timer running
 
-    def _status_apply_battery(self, dev, bl, ch):
+    def _status_apply_battery(self, dev, bl, ch, sn=None):
         """Called from the worker thread via GLib.idle_add — runs on main."""
         self._status_bat_inflight = False
         # Bail if device disconnected/replaced while the worker was running.
         if self._device is None or self._device is not dev:
             return False
+        if sn and sn != '-1' and hasattr(self, '_sn_label'):
+            self._sn_label.set_text(f'SN:{sn}')
+            self._sn_resolved = True
         # If the read failed (wireless link not up yet after hot-plug), retry
         # in 10s instead of waiting the full 60s throttle window.
         if not bl or bl == '-1':

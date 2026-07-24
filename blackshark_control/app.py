@@ -801,19 +801,13 @@ class BlackSharkControl(Gtk.ApplicationWindow):
             sidetone_cb = self._tray_set_sidetone,
             anc_cb      = self._tray_set_anc,
             ull_cb      = self._tray_set_ull,
-            activate_cb = self._tray_activate,
+            activate_cb = self.present,
             fn_cb       = self._tray_set_fn_mode,
             eq_cb       = self._tray_set_eq_preset,
             pwr_cb      = self._tray_set_pwr_timeout,
             gc_cb       = self._tray_set_game_chat,
             resync_cb   = self._on_resync_clicked,
         ) or (_log('tray started') or False))
-
-    def _tray_activate(self):
-        if self._tray_view is None:
-            self._tray_view = TrayView(self)
-        self._tray_view.refresh()
-        self._tray_view.present()
 
     def _tray_set_mic_preset(self, idx):
         self._mic_target_idx = idx

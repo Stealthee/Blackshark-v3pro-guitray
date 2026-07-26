@@ -4,7 +4,7 @@ import os
 import subprocess
 from PIL import Image, ImageDraw, ImageFont
 
-from blackshark_control._update_check import RELEASES_URL
+from lyanpse._update_check import RELEASES_URL
 
 _LOG       = '/tmp/bs-tray.log'
 _FONT_PATH = '/usr/share/fonts/TTF/DejaVuSans-Bold.ttf'
@@ -580,7 +580,7 @@ class BatteryTray:
             return False
         try:
             self._bus      = dbus.SessionBus()
-            self._bus_name = dbus.service.BusName('org.kde.StatusNotifierItem-bs', self._bus)
+            self._bus_name = dbus.service.BusName('org.kde.StatusNotifierItem-lyanpse', self._bus)
             self._sni      = _SNIService(self._bus, '/StatusNotifierItem', self)
             self._menu     = _MenuService(self._bus, '/StatusNotifierMenu', self)
             watcher = self._bus.get_object(

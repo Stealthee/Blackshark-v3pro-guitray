@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""BlackShark V3 control panel — real-time testing GUI for the razerkraken driver fork."""
+"""Lyanpse — real-time testing GUI for the Razer BlackShark V3 headset (razerkraken driver fork)."""
 
 import gi
 gi.require_version('Gtk', '4.0')
@@ -16,8 +16,8 @@ def _log(msg):
     except Exception:
         pass
 
-from blackshark_control._tray import BatteryTray as _BatteryTray
-from blackshark_control import _update_check
+from lyanpse._tray import BatteryTray as _BatteryTray
+from lyanpse import _update_check
 
 SYSFS_DIR = '/sys/bus/hid/drivers/razerkraken'
 PIDS = ('0576', '0577', '057A', '0579')   # V3 Pro wired, V3 Pro 2.4GHz, V3 wireless dongle, V3 wired
@@ -111,7 +111,7 @@ MIC_EQ_FACTORY = {i: list(v) for i, (_, v) in enumerate(MIC_EQ_PRESET_BANDS.item
 # Factory (Razer built-in) values per profile slot
 EQ_FACTORY = {PRESET_IDX[n]: list(v) for n, v in EQ_PRESETS.items()}
 
-CONFIG_FILE = os.path.expanduser('~/.config/blackshark-control.json')
+CONFIG_FILE = os.path.expanduser('~/.config/lyanpse.json')
 
 def _read_config():
     try:
@@ -296,7 +296,7 @@ class TrayView(Gtk.Window):
     """Compact quick-settings popup — shown when tray icon is left-clicked."""
 
     def __init__(self, ctrl):
-        super().__init__(title='BlackShark Quick')
+        super().__init__(title='Lyanpse Quick')
         self._ctrl    = ctrl
         self._busy    = False
         self.set_resizable(False)
@@ -400,21 +400,21 @@ class TrayView(Gtk.Window):
 
 def _install_app_icon():
     try:
-        from blackshark_control._tray import render_logo
+        from lyanpse._tray import render_logo
         base = os.path.expanduser('~/.local/share/icons/hicolor')
         for sz in (256, 128, 48):
             d = os.path.join(base, f'{sz}x{sz}', 'apps')
             os.makedirs(d, exist_ok=True)
-            render_logo(sz).save(os.path.join(d, 'blackshark-control.png'))
+            render_logo(sz).save(os.path.join(d, 'lyanpse.png'))
     except Exception as e:
         _log(f'icon install: {e}')
 
 class BlackSharkControl(Gtk.ApplicationWindow):
     def __init__(self, app):
-        super().__init__(application=app, title='BlackShark Control')
+        super().__init__(application=app, title='Lyanpse')
         self.set_default_size(900, 620)
         self.set_resizable(False)
-        self.set_icon_name('blackshark-control')
+        self.set_icon_name('lyanpse')
 
         self._device = Device.detect()
 
@@ -501,8 +501,7 @@ class BlackSharkControl(Gtk.ApplicationWindow):
         about_btn.connect('clicked', self._on_about_clicked)
         nb.set_action_widget(about_btn, Gtk.PackType.START)
 
-        self.set_title(f'{self._device.name} Control' if self._device
-                       else 'BlackShark Control')
+        self.set_title('Lyanpse')
         self.connect('close-request', self._on_close_request)
         self._init_tray()
         self._refresh_status()
@@ -526,7 +525,7 @@ class BlackSharkControl(Gtk.ApplicationWindow):
     def _check_for_update(self):
         def _worker():
             try:
-                current = _pkg_version('blackshark-control')
+                current = _pkg_version('lyanpse')
             except PackageNotFoundError:
                 # Can't determine the installed version — skip rather than
                 # risk a false "Update available" (a fallback like '0.0.0'
@@ -541,15 +540,15 @@ class BlackSharkControl(Gtk.ApplicationWindow):
 
     def _on_about_clicked(self, _btn):
         try:
-            ver = _pkg_version('blackshark-control')
+            ver = _pkg_version('lyanpse')
         except PackageNotFoundError:
             ver = 'unknown'
         about = Gtk.AboutDialog()
         about.set_transient_for(self)
         about.set_modal(True)
-        about.set_program_name('BlackShark Control')
+        about.set_program_name('Lyanpse')
         about.set_version(ver)
-        about.set_logo_icon_name('blackshark-control')
+        about.set_logo_icon_name('lyanpse')
         about.set_comments('GTK4 control panel for the Razer BlackShark V3 / V3 Pro headsets.')
         about.set_license_type(Gtk.License.GPL_2_0)
         about.set_website(_update_check.RELEASES_URL)
@@ -1841,7 +1840,7 @@ class BlackSharkControl(Gtk.ApplicationWindow):
 
 class App(Gtk.Application):
     def __init__(self):
-        super().__init__(application_id='com.blackshark.control')
+        super().__init__(application_id='com.lyanpse.app')
 
     def do_activate(self):
         _install_app_icon()

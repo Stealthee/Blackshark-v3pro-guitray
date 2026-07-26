@@ -1,11 +1,12 @@
 [Desktop Entry]
 Type=Application
-Name=BlackShark V3 Control
+Name=Lyanpse
 GenericName=Headset Control Panel
 Comment=Configure the Razer BlackShark V3 headset (EQ, sidetone, mic settings)
-Exec=blackshark-control
-Icon=blackshark-control
+Exec=lyanpse
+Icon=lyanpse
 Categories=AudioVideo;Audio;Mixer;Settings;HardwareSettings;
-Keywords=razer;blackshark;headset;eq;equalizer;mic;audio;
 Terminal=false
-StartupNotify=true
+StartupNotify=false
+X-GNOME-Autostart-enabled=true
+X-KDE-autostart-after=panel

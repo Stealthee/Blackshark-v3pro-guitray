@@ -1,4 +1,4 @@
-blackshark-control (0.1.2-1) unstable; urgency=medium
+lyanpse (0.1.2-1) unstable; urgency=medium
 
   * Fix battery-trend charging override not surviving an app restart.
 

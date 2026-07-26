@@ -3,7 +3,7 @@ requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "blackshark-control"
+name = "lyanpse"
 version = "0.1.2"
 description = "GTK4 control panel for the Razer BlackShark V3 (openrazer razerkraken driver)"
 readme = "README.md"
@@ -27,10 +27,10 @@ Homepage = "https://github.com/Stealthee/Blackshark-v3pro-guitray"
 "Bug Tracker" = "https://github.com/Stealthee/Blackshark-v3pro-guitray/issues"
 
 [project.scripts]
-blackshark-control = "blackshark_control.app:main"
+lyanpse = "lyanpse.app:main"
 
 [tool.setuptools]
-packages = ["blackshark_control"]
+packages = ["lyanpse"]
 
 [tool.setuptools.package-data]
-blackshark_control = []
+lyanpse = []

@@ -1,10 +1,10 @@
 #!/usr/bin/make -f
-export PYBUILD_NAME=blackshark-control
+export PYBUILD_NAME=lyanpse
 
 %:
 	dh $@ --with python3 --buildsystem=pybuild
 
 override_dh_install:
 	dh_install
-	install -Dm644 data/blackshark-control.desktop debian/blackshark-control/usr/share/applications/blackshark-control.desktop
-	install -Dm644 data/blackshark-control.svg debian/blackshark-control/usr/share/icons/hicolor/scalable/apps/blackshark-control.svg
+	install -Dm644 data/lyanpse.desktop debian/lyanpse/usr/share/applications/lyanpse.desktop
+	install -Dm644 data/lyanpse.svg debian/lyanpse/usr/share/icons/hicolor/scalable/apps/lyanpse.svg

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Update blackshark-control: pulls the latest source from this clone's
+# Update lyanpse: pulls the latest source from this clone's
 # git remote and reinstalls.
 #
 # Usage: from inside your cloned Blackshark-v3pro-guitray directory:
@@ -7,7 +7,7 @@
 #   ./bsupdate.sh --user    — reinstall to ~/.local
 #
 # Any extra arguments are passed through to install.sh. If
-# blackshark-control is currently running, it's restarted afterward so the
+# lyanpse is currently running, it's restarted afterward so the
 # update takes effect immediately.
 
 set -e
@@ -19,12 +19,12 @@ git pull
 echo ""
 ./install.sh "$@"
 
-if pgrep -f '/bin/blackshark-control$' >/dev/null; then
+if pgrep -f '/bin/lyanpse$' >/dev/null; then
     echo ""
-    echo "Restarting blackshark-control..."
-    pkill -f '/bin/blackshark-control$'
+    echo "Restarting lyanpse..."
+    pkill -f '/bin/lyanpse$'
     sleep 1
-    nohup blackshark-control >/dev/null 2>&1 &
+    nohup lyanpse >/dev/null 2>&1 &
     disown
 fi
 

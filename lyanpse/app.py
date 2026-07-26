@@ -409,7 +409,7 @@ def _install_app_icon():
     except Exception as e:
         _log(f'icon install: {e}')
 
-class BlackSharkControl(Gtk.ApplicationWindow):
+class LyanpseWindow(Gtk.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title='Lyanpse')
         self.set_default_size(900, 620)
@@ -1844,7 +1844,7 @@ class App(Gtk.Application):
 
     def do_activate(self):
         _install_app_icon()
-        win = BlackSharkControl(self)
+        win = LyanpseWindow(self)
 
         provider = Gtk.CssProvider()
         provider.load_from_data(CSS)

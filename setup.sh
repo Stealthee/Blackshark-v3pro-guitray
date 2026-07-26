@@ -33,7 +33,7 @@ warn() { printf '\033[1;33m!!\033[0m %s\n' "$*" >&2; }
 say "Stopping any running openrazer daemon and old GUI processes"
 systemctl --user stop openrazer-daemon 2>/dev/null || true
 pkill -f openrazer-daemon 2>/dev/null || true
-pkill -f blackshark-control 2>/dev/null || true
+pkill -f lyanpse 2>/dev/null || true
 
 # ── 2. Remove distro / DKMS razerkraken so our local build wins ─────────────
 say "Removing distro openrazer-driver-dkms / openrazer-daemon if present"
@@ -146,7 +146,7 @@ done
 shopt -u nullglob
 
 # ── 8. Install the GUI ──────────────────────────────────────────────────────
-say "Cloning/updating blackshark-control GUI"
+say "Cloning/updating Lyanpse GUI"
 if [ ! -f "$GUI_DIR/pyproject.toml" ]; then
     [ -d "$GUI_DIR" ] && rm -rf "$GUI_DIR"
     git clone "$GUI_REPO" "$GUI_DIR"
@@ -155,9 +155,9 @@ else
 fi
 
 say "Removing any /usr/local shim from a previous install"
-sudo rm -f /usr/local/bin/blackshark-control
+sudo rm -f /usr/local/bin/lyanpse
 
-say "Installing blackshark-control to /usr"
+say "Installing Lyanpse to /usr"
 sudo pip install --break-system-packages --prefix=/usr --force-reinstall --no-deps "$GUI_DIR"
 hash -r
 
@@ -179,4 +179,4 @@ echo "   ls /sys/bus/hid/drivers/razerkraken/"
 echo "     # should list 0003:1532:0577.* (V3 Pro 2.4 GHz),"
 echo "     # 0003:1532:0576.* (V3 Pro wired), 057A.* (V3 2.4 GHz),"
 echo "     # or 0579.* (V3 wired)"
-echo "   blackshark-control"
+echo "   lyanpse"

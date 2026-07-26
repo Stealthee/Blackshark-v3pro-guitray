@@ -1,4 +1,4 @@
-Source: lyanpse
+Source: lynapse
 Section: sound
 Priority: optional
 Maintainer: Mehmet Bayoglu <noreply@example.com>
@@ -9,14 +9,14 @@ Build-Depends: debhelper-compat (= 13),
 Standards-Version: 4.6.0
 Homepage: https://github.com/Stealthee/Blackshark-v3pro-guitray
 
-Package: lyanpse
+Package: lynapse
 Architecture: all
 Depends: ${misc:Depends},
          ${python3:Depends},
          python3-gi,
          gir1.2-gtk-4.0,
          openrazer-meta
-Description: Lyanpse — GTK4 control panel for the Razer BlackShark V3 headset
+Description: Lynapse — GTK4 control panel for the Razer BlackShark V3 headset
  Provides a graphical interface for the openrazer razerkraken driver
  sysfs attributes specific to the BlackShark V3: 5-profile headphone
  EQ, mic EQ with presets, sidetone, and audio function button mode.

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Universal installer for lyanpse. Works on any Linux distro
+# Universal installer for lynapse. Works on any Linux distro
 # with Python 3.9+, GTK4, and PyGObject available.
 #
 # Usage:
@@ -29,18 +29,18 @@ done
 cd "$(dirname "$0")"
 
 if [ "$ACTION" = "uninstall" ]; then
-    $USE_SUDO $(command -v python3) -m pip uninstall -y lyanpse || true
-    $USE_SUDO rm -f "$PREFIX/share/applications/lyanpse.desktop"
-    $USE_SUDO rm -f "$PREFIX/share/icons/hicolor/scalable/apps/lyanpse.svg"
+    $USE_SUDO $(command -v python3) -m pip uninstall -y lynapse || true
+    $USE_SUDO rm -f "$PREFIX/share/applications/lynapse.desktop"
+    $USE_SUDO rm -f "$PREFIX/share/icons/hicolor/scalable/apps/lynapse.svg"
     echo "Uninstalled."
     exit 0
 fi
 
 if [ "$ACTION" = "autostart" ]; then
     mkdir -p "$HOME/.config/autostart"
-    cp data/lyanpse-autostart.desktop "$HOME/.config/autostart/lyanpse.desktop"
+    cp data/lynapse-autostart.desktop "$HOME/.config/autostart/lynapse.desktop"
     echo "Autostart enabled — the tray icon will start on next login."
-    echo "To undo: rm ~/.config/autostart/lyanpse.desktop"
+    echo "To undo: rm ~/.config/autostart/lynapse.desktop"
     exit 0
 fi
 
@@ -102,26 +102,26 @@ $USE_SUDO $(command -v python3) -m pip install "${PIP_ARGS[@]}" ".[tray]"
 # original user's reports.
 PY_VER=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
 if [ "$PREFIX" != "$HOME/.local" ] && [ "$PREFIX" != "/usr" ]; then
-    INSTALLED_TO="$PREFIX/lib/python$PY_VER/site-packages/lyanpse"
+    INSTALLED_TO="$PREFIX/lib/python$PY_VER/site-packages/lynapse"
     SYS_SP="/usr/lib/python$PY_VER/site-packages"
     # Test from /tmp (so the repo dir doesn't shadow the import).
     if [ -d "$INSTALLED_TO" ] && [ -d "$SYS_SP" ] && \
-       ! ( cd /tmp && python3 -c "import lyanpse" ) 2>/dev/null; then
+       ! ( cd /tmp && python3 -c "import lynapse" ) 2>/dev/null; then
         echo "Symlinking $INSTALLED_TO → $SYS_SP/ (system sys.path doesn't include $PREFIX)"
-        $USE_SUDO ln -sfn "$INSTALLED_TO" "$SYS_SP/lyanpse"
+        $USE_SUDO ln -sfn "$INSTALLED_TO" "$SYS_SP/lynapse"
     fi
     # Same deal for the package's dist-info: without it on sys.path,
-    # importlib.metadata.version('lyanpse') raises
+    # importlib.metadata.version('lynapse') raises
     # PackageNotFoundError, which breaks the tray's update-check.
     if [ -d "$SYS_SP" ] && \
-       ! ( cd /tmp && python3 -c "from importlib.metadata import version; version('lyanpse')" ) 2>/dev/null; then
-        for d in "$PREFIX/lib/python$PY_VER/site-packages"/lyanpse-*.dist-info; do
+       ! ( cd /tmp && python3 -c "from importlib.metadata import version; version('lynapse')" ) 2>/dev/null; then
+        for d in "$PREFIX/lib/python$PY_VER/site-packages"/lynapse-*.dist-info; do
             [ -d "$d" ] && $USE_SUDO ln -sfn "$d" "$SYS_SP/$(basename "$d")"
         done
     fi
 fi
-$USE_SUDO install -Dm644 data/lyanpse.desktop "$PREFIX/share/applications/lyanpse.desktop"
-$USE_SUDO install -Dm644 data/lyanpse.svg "$PREFIX/share/icons/hicolor/scalable/apps/lyanpse.svg"
+$USE_SUDO install -Dm644 data/lynapse.desktop "$PREFIX/share/applications/lynapse.desktop"
+$USE_SUDO install -Dm644 data/lynapse.svg "$PREFIX/share/icons/hicolor/scalable/apps/lynapse.svg"
 
 if command -v gtk-update-icon-cache >/dev/null 2>&1; then
     $USE_SUDO gtk-update-icon-cache -f -t "$PREFIX/share/icons/hicolor" 2>/dev/null || true
@@ -131,7 +131,7 @@ if command -v update-desktop-database >/dev/null 2>&1; then
 fi
 
 echo ""
-echo "Done. Launch from your application menu or run:  lyanpse"
+echo "Done. Launch from your application menu or run:  lynapse"
 if ! id -nG "$USER" | grep -qw openrazer; then
     echo ""
     echo "WARNING: your user is not in the 'openrazer' group."

@@ -12,8 +12,8 @@ all:
 
 install:
 	$(PYTHON) -m pip install --root="$(DESTDIR)" --prefix="$(PREFIX)" .
-	install -Dm644 data/lyanpse.desktop "$(DESTDIR)$(PREFIX)/share/applications/lyanpse.desktop"
-	install -Dm644 data/lyanpse.svg "$(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/lyanpse.svg"
+	install -Dm644 data/lynapse.desktop "$(DESTDIR)$(PREFIX)/share/applications/lynapse.desktop"
+	install -Dm644 data/lynapse.svg "$(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/lynapse.svg"
 	@if [ -z "$(DESTDIR)" ] && command -v gtk-update-icon-cache >/dev/null 2>&1; then \
 		gtk-update-icon-cache -f -t "$(PREFIX)/share/icons/hicolor" 2>/dev/null || true; \
 	fi
@@ -21,13 +21,13 @@ install:
 		update-desktop-database -q "$(PREFIX)/share/applications" 2>/dev/null || true; \
 	fi
 	@echo ""
-	@echo "Installed. Run 'lyanpse' or launch from your application menu."
+	@echo "Installed. Run 'lynapse' or launch from your application menu."
 	@echo "If your user is not in the 'openrazer' group, add it: sudo usermod -aG openrazer \$$USER (then re-login)"
 
 uninstall:
-	$(PYTHON) -m pip uninstall -y lyanpse || true
-	rm -f "$(DESTDIR)$(PREFIX)/share/applications/lyanpse.desktop"
-	rm -f "$(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/lyanpse.svg"
+	$(PYTHON) -m pip uninstall -y lynapse || true
+	rm -f "$(DESTDIR)$(PREFIX)/share/applications/lynapse.desktop"
+	rm -f "$(DESTDIR)$(PREFIX)/share/icons/hicolor/scalable/apps/lynapse.svg"
 
 clean:
 	rm -rf build dist *.egg-info

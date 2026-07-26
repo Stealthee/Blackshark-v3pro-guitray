@@ -1,8 +1,8 @@
 # Maintainer: Mehmet Bayoglu
-pkgname=lyanpse
+pkgname=lynapse
 pkgver=0.1.2
 pkgrel=1
-pkgdesc="Lyanpse — GTK4 control panel for the Razer BlackShark V3 (openrazer razerkraken)"
+pkgdesc="Lynapse — GTK4 control panel for the Razer BlackShark V3 (openrazer razerkraken)"
 arch=('any')
 url="https://github.com/Stealthee/Blackshark-v3pro-guitray"
 license=('GPL2')
@@ -19,7 +19,7 @@ build() {
 package() {
     cd "$pkgname-$pkgver"
     python -m installer --destdir="$pkgdir" dist/*.whl
-    install -Dm644 data/lyanpse.desktop "$pkgdir/usr/share/applications/lyanpse.desktop"
-    install -Dm644 data/lyanpse.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/lyanpse.svg"
+    install -Dm644 data/lynapse.desktop "$pkgdir/usr/share/applications/lynapse.desktop"
+    install -Dm644 data/lynapse.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/lynapse.svg"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

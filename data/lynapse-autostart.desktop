@@ -1,10 +1,10 @@
 [Desktop Entry]
 Type=Application
-Name=Lyanpse
+Name=Lynapse
 GenericName=Headset Control Panel
 Comment=Configure the Razer BlackShark V3 headset (EQ, sidetone, mic settings)
-Exec=lyanpse
-Icon=lyanpse
+Exec=lynapse
+Icon=lynapse
 Categories=AudioVideo;Audio;Mixer;Settings;HardwareSettings;
 Terminal=false
 StartupNotify=false

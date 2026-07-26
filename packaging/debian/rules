@@ -1,10 +1,10 @@
 #!/usr/bin/make -f
-export PYBUILD_NAME=lyanpse
+export PYBUILD_NAME=lynapse
 
 %:
 	dh $@ --with python3 --buildsystem=pybuild
 
 override_dh_install:
 	dh_install
-	install -Dm644 data/lyanpse.desktop debian/lyanpse/usr/share/applications/lyanpse.desktop
-	install -Dm644 data/lyanpse.svg debian/lyanpse/usr/share/icons/hicolor/scalable/apps/lyanpse.svg
+	install -Dm644 data/lynapse.desktop debian/lynapse/usr/share/applications/lynapse.desktop
+	install -Dm644 data/lynapse.svg debian/lynapse/usr/share/icons/hicolor/scalable/apps/lynapse.svg

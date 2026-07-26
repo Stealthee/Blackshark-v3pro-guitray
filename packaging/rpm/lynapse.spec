@@ -1,7 +1,7 @@
-Name:           lyanpse
+Name:           lynapse
 Version:        0.1.2
 Release:        1%{?dist}
-Summary:        Lyanpse — GTK4 control panel for the Razer BlackShark V3 headset
+Summary:        Lynapse — GTK4 control panel for the Razer BlackShark V3 headset
 
 License:        GPL-2.0-or-later
 URL:            https://github.com/Stealthee/Blackshark-v3pro-guitray
@@ -32,17 +32,17 @@ the openrazer razerkraken driver's sysfs interface.
 
 %install
 %py3_install
-install -Dm644 data/lyanpse.desktop %{buildroot}%{_datadir}/applications/lyanpse.desktop
-install -Dm644 data/lyanpse.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/lyanpse.svg
+install -Dm644 data/lynapse.desktop %{buildroot}%{_datadir}/applications/lynapse.desktop
+install -Dm644 data/lynapse.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/apps/lynapse.svg
 
 %files
 %license LICENSE
 %doc README.md
-%{_bindir}/lyanpse
-%{python3_sitelib}/lyanpse/
-%{python3_sitelib}/lyanpse-*.egg-info/
-%{_datadir}/applications/lyanpse.desktop
-%{_datadir}/icons/hicolor/scalable/apps/lyanpse.svg
+%{_bindir}/lynapse
+%{python3_sitelib}/lynapse/
+%{python3_sitelib}/lynapse-*.egg-info/
+%{_datadir}/applications/lynapse.desktop
+%{_datadir}/icons/hicolor/scalable/apps/lynapse.svg
 
 %changelog
 * Fri Jun 12 2026 Mehmet Bayoglu - 0.1.2-1

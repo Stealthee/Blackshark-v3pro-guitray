@@ -1,5 +1,5 @@
 Name:           lynapse
-Version:        0.1.2
+Version:        0.1.4
 Release:        1%{?dist}
 Summary:        Lynapse — GTK4 control panel for the Razer BlackShark V3 headset
 

@@ -181,8 +181,6 @@ scale.vertical trough { min-width: 4px; min-height: 4px; }
 .preset-btn.active { background: #003a12; color: #00ff41; border-color: #00ff41; }
 .toggle-on { background: #003a12; color: #00ff41; border-radius: 4px; padding: 4px 12px; border: 1px solid #00ff41; }
 .toggle-off { background: #2a2a2a; color: #666; border-radius: 4px; padding: 4px 12px; border: 1px solid #444; }
-.apply-btn { background: #00ff41; color: #000; border-radius: 4px; padding: 8px 20px; font-weight: bold; font-size: 12px; border: none; }
-.apply-btn:hover { background: #00cc33; }
 .status-ok { color: #00ff41; font-size: 10px; }
 .status-err { color: #ff4444; font-size: 10px; }
 .pwr-btn { background: #2a2a2a; color: #888; border: 1px solid #333; border-radius: 4px; padding: 6px 14px; }
@@ -895,8 +893,6 @@ class LynapseWindow(Gtk.ApplicationWindow):
             for n, b in self._preset_btns.items():
                 if n == name: b.add_css_class('active')
                 else: b.remove_css_class('active')
-            if hasattr(self, '_update_profile_selector'):
-                self._update_profile_selector()
             self._load_sliders(vals)
         if self._eq_apply_timer:
             GLib.source_remove(self._eq_apply_timer)
@@ -1189,32 +1185,6 @@ class LynapseWindow(Gtk.ApplicationWindow):
         reset_row.append(reset_btn)
         eq_card.append(reset_row)
 
-        # profile target selector
-        prof_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        prof_row.set_margin_top(4)
-        prof_lbl = Gtk.Label(label='Write to:')
-        prof_lbl.add_css_class('db-label')
-        prof_row.append(prof_lbl)
-        self._profile_sel_btns = {}
-        for name, idx in PRESET_IDX.items():
-            b = Gtk.Button(label=name)
-            b.add_css_class('pwr-btn')
-            if idx == 0:
-                b.add_css_class('active')
-            b.connect('clicked', self._on_profile_sel, idx)
-            prof_row.append(b)
-            self._profile_sel_btns[idx] = b
-        eq_card.append(prof_row)
-
-        apply_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        apply_row.set_halign(Gtk.Align.END)
-        apply_row.set_margin_top(4)
-        apply_btn = Gtk.Button(label='Apply EQ')
-        apply_btn.add_css_class('apply-btn')
-        apply_btn.connect('clicked', self._on_eq_apply)
-        apply_row.append(apply_btn)
-        eq_card.append(apply_row)
-
         right.append(eq_card)
 
         return outer
@@ -1240,7 +1210,6 @@ class LynapseWindow(Gtk.ApplicationWindow):
             b.remove_css_class('active')
         btn.add_css_class('active')
         self._eq_target_profile = PRESET_IDX[name]
-        self._update_profile_selector()
 
         def _finish_preset_change():
             vals = self._eq_custom.get(self._eq_target_profile,
@@ -1286,18 +1255,6 @@ class LynapseWindow(Gtk.ApplicationWindow):
         self._apply_eq()
         return False
 
-    def _update_profile_selector(self):
-        for idx, btn in self._profile_sel_btns.items():
-            if idx == self._eq_target_profile:
-                btn.add_css_class('active')
-            else:
-                btn.remove_css_class('active')
-
-    def _on_profile_sel(self, btn, idx):
-        # treat exactly like clicking the matching preset button
-        name = [n for n, i in PRESET_IDX.items() if i == idx][0]
-        self._on_preset(self._preset_btns[name], name)
-
     def _apply_eq(self, profile_idx=None):
         if profile_idx is None:
             profile_idx = self._eq_target_profile
@@ -1322,9 +1279,6 @@ class LynapseWindow(Gtk.ApplicationWindow):
 
         import threading
         threading.Thread(target=_worker, daemon=True).start()
-
-    def _on_eq_apply(self, btn):
-        self._apply_eq()
 
     # ── Enhancement tab ─────────────────────────────────────────────────────
 

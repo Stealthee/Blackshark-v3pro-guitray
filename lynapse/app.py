@@ -420,9 +420,19 @@ def _install_app_icon():
     except Exception as e:
         _log(f'icon install: {e}')
 
+
+def _window_title():
+    """'Lynapse' with the installed version appended when it's determinable
+    (e.g. 'Lynapse v0.1.9') — mainly so a reinstall's effect is visible at a
+    glance without opening the About dialog."""
+    try:
+        return f'Lynapse v{_pkg_version("lynapse")}'
+    except PackageNotFoundError:
+        return 'Lynapse'
+
 class LynapseWindow(Gtk.ApplicationWindow):
     def __init__(self, app):
-        super().__init__(application=app, title='Lynapse')
+        super().__init__(application=app, title=_window_title())
         self.set_default_size(900, 620)
         self.set_resizable(False)
         self.set_icon_name('lynapse')
@@ -515,7 +525,7 @@ class LynapseWindow(Gtk.ApplicationWindow):
         about_btn.connect('clicked', self._on_about_clicked)
         nb.set_action_widget(about_btn, Gtk.PackType.START)
 
-        self.set_title('Lynapse')
+        self.set_title(_window_title())
         self.connect('close-request', self._on_close_request)
         self._init_tray()
         self._refresh_status()

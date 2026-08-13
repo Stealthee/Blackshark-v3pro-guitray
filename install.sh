@@ -111,13 +111,31 @@ if [ "$PREFIX" != "$HOME/.local" ] && [ "$PREFIX" != "/usr" ]; then
         $USE_SUDO ln -sfn "$INSTALLED_TO" "$SYS_SP/lynapse"
     fi
     # Same deal for the package's dist-info: without it on sys.path,
-    # importlib.metadata.version('lynapse') raises
-    # PackageNotFoundError, which breaks the tray's update-check.
-    if [ -d "$SYS_SP" ] && \
-       ! ( cd /tmp && python3 -c "from importlib.metadata import version; version('lynapse')" ) 2>/dev/null; then
-        for d in "$PREFIX/lib/python$PY_VER/site-packages"/lynapse-*.dist-info; do
-            [ -d "$d" ] && $USE_SUDO ln -sfn "$d" "$SYS_SP/$(basename "$d")"
+    # importlib.metadata.version('lynapse') can't see real version
+    # metadata. This can't be gated the same "does it already work" way as
+    # the import check above — a *stale* symlink left over from a previous
+    # version (its dist-info dir renamed/removed on the next upgrade,
+    # since pip doesn't clean up old prefix-install dist-info dirs across
+    # version bumps) still "passes" that kind of check:
+    # importlib.metadata's PathDistribution treats a missing METADATA file
+    # as absent rather than an error, so version('lynapse') silently
+    # returns None instead of raising PackageNotFoundError — which is how
+    # the window title/About dialog/update-check ended up showing "vNone"
+    # even though pip itself was fine. Always prune and relink instead of
+    # conditionally skipping.
+    PREFIX_SP="$PREFIX/lib/python$PY_VER/site-packages"
+    if [ -d "$SYS_SP" ]; then
+        $USE_SUDO find "$SYS_SP" -maxdepth 1 -name 'lynapse-*.dist-info' -exec rm -rf {} \; 2>/dev/null || true
+        # Also drop orphaned dist-info dirs for old versions inside PREFIX
+        # itself (pip leaves these behind across version bumps here since
+        # each version gets its own dist-info dir name) — keep only the
+        # one just installed (newest by mtime), so there's exactly one
+        # unambiguous symlink target.
+        latest=$(ls -td "$PREFIX_SP"/lynapse-*.dist-info 2>/dev/null | head -1)
+        for d in "$PREFIX_SP"/lynapse-*.dist-info; do
+            [ -d "$d" ] && [ "$d" != "$latest" ] && $USE_SUDO rm -rf "$d"
         done
+        [ -n "$latest" ] && $USE_SUDO ln -sfn "$latest" "$SYS_SP/$(basename "$latest")"
     fi
 fi
 $USE_SUDO install -Dm644 data/lynapse.desktop "$PREFIX/share/applications/lynapse.desktop"

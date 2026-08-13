@@ -216,6 +216,31 @@ def enable():
     return True, None
 
 
+def enforce():
+    """Cheap, poll-safe sweep: move any sink-inputs currently sitting on the
+    raw game sink onto the THX effect sink. No config write, no PipeWire
+    restart — just the same `pactl move-sink-input` enable() already does
+    for its own toggle-time sweep, called repeatedly instead of once.
+
+    enable()'s sweep only runs for ~1s at the moment THX is turned on, so it
+    misses anything that starts or reconnects to the game sink *after*
+    that — a new browser tab, a paused video resumed a few seconds later, a
+    game reconnecting its audio device, autoplay handled via
+    module-stream-restore, etc. Those streams then just play straight
+    through on the unprocessed sink, which sounds identical to THX being
+    off even though the toggle shows on. Call this from a periodic UI poll
+    while THX is enabled to keep catching stragglers. No-op (and cheap —
+    one `pactl list sinks` round-trip) if the effect sink isn't live."""
+    if not any(s[1] == SINK_NAME for s in _sinks()):
+        return
+    game = _find_game_sink()
+    if not game:
+        return
+    game_id, _ = game
+    for sid in _sink_input_ids_on(game_id):
+        _pactl('move-sink-input', sid, SINK_NAME)
+
+
 def disable():
     """Turn THX-style surround off — moves anything currently on the
     convolver back onto the headset's game sink. The filter-chain config is

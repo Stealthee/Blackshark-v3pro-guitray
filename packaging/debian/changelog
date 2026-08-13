@@ -1,3 +1,13 @@
+lynapse (0.1.11-1) unstable; urgency=medium
+
+  * THX Spatial Audio: fix streams that start/reconnect to the game sink
+    after the toggle-time sweep window never getting the effect applied
+    (sounded identical to THX off no matter how many times you flipped
+    it). Added a cheap continuous sweep piggybacked on the existing
+    700ms live-sync poll.
+
+ -- Mehmet Bayoglu <noreply@example.com>  Thu, 13 Aug 2026 18:00:00 -0500
+
 lynapse (0.1.10-1) unstable; urgency=medium
 
   * THX Spatial Audio: stack a second gain bump on the convolver graph

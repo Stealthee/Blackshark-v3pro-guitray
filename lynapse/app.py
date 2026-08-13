@@ -859,6 +859,14 @@ class LynapseWindow(Gtk.ApplicationWindow):
         dev = self._device
         def _worker():
             vals = {f: dev.read(f) for f in self._SYNC_FEATURES if dev.has(f)}
+            # Piggyback THX's stray-stream sweep on this same poll (see
+            # _thx.enforce()) — enable()'s own sweep only lasts ~1s at
+            # toggle time, so anything that starts playing on the game
+            # sink after that (a browser tab resumed later, etc.) would
+            # otherwise never get moved onto the effect sink and just
+            # sound identical to THX off.
+            if self._thx_on:
+                _thx.enforce()
             GLib.idle_add(self._apply_live_sync, dev, vals)
         threading.Thread(target=_worker, daemon=True).start()
         return True   # keep timer running

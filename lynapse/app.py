@@ -18,6 +18,7 @@ def _log(msg):
 
 from lynapse._tray import BatteryTray as _BatteryTray
 from lynapse import _update_check
+from lynapse import _thx
 
 SYSFS_DIR = '/sys/bus/hid/drivers/razerkraken'
 PIDS = ('0576', '0577', '057A', '0579')   # V3 Pro wired, V3 Pro 2.4GHz, V3 wireless dongle, V3 wired
@@ -192,6 +193,7 @@ scale.vertical trough { min-width: 4px; min-height: 4px; }
 .preset-btn.active { background: #003a12; color: #00ff41; border-color: #00ff41; }
 .toggle-on { background: #003a12; color: #00ff41; border-radius: 4px; padding: 4px 12px; border: 1px solid #00ff41; }
 .toggle-off { background: #2a2a2a; color: #666; border-radius: 4px; padding: 4px 12px; border: 1px solid #444; }
+.thx-btn { padding: 8px 18px; min-width: 150px; }
 .status-ok { color: #00ff41; font-size: 10px; }
 .status-err { color: #ff4444; font-size: 10px; }
 .pwr-btn { background: #2a2a2a; color: #888; border: 1px solid #333; border-radius: 4px; padding: 6px 14px; }
@@ -1049,12 +1051,7 @@ class LynapseWindow(Gtk.ApplicationWindow):
                 self._ull_btn.add_css_class('toggle-off')
 
     def _tray_set_thx(self, on):
-        self._thx_on = on
-        self._write('thx', '1' if on else '0')
-        if hasattr(self, '_thx_btn'):
-            self._thx_btn.set_label('THX SPATIAL AUDIO' if on else 'STEREO')
-            self._thx_btn.remove_css_class('toggle-off' if on else 'toggle-on')
-            self._thx_btn.add_css_class('toggle-on' if on else 'toggle-off')
+        self._set_thx(on)
 
     def _tray_set_in_call_mix(self, mode):
         self._in_call_mix = mode
@@ -1287,8 +1284,13 @@ class LynapseWindow(Gtk.ApplicationWindow):
         thx_lbl.set_halign(Gtk.Align.START)
         thx_card.append(thx_lbl)
         thx_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self._thx_btn = Gtk.Button(label='THX' if self._thx_on else 'STEREO')
+        self._thx_btn = Gtk.Button()
         self._thx_btn.add_css_class('toggle-on' if self._thx_on else 'toggle-off')
+        self._thx_btn.add_css_class('thx-btn')
+        self._thx_btn_lbl = Gtk.Label()
+        self._thx_btn_lbl.set_justify(Gtk.Justification.CENTER)
+        self._thx_btn.set_child(self._thx_btn_lbl)
+        self._set_thx_btn_markup(self._thx_on)
         self._thx_btn.connect('clicked', self._on_thx_toggle)
         thx_row.append(self._thx_btn)
         thx_card.append(thx_row)
@@ -1386,16 +1388,56 @@ class LynapseWindow(Gtk.ApplicationWindow):
         return outer
 
     def _on_thx_toggle(self, btn):
-        self._thx_on = not self._thx_on
-        if self._thx_on:
-            btn.set_label('THX SPATIAL AUDIO')
-            btn.remove_css_class('toggle-off')
-            btn.add_css_class('toggle-on')
-        else:
-            btn.set_label('STEREO')
-            btn.remove_css_class('toggle-on')
-            btn.add_css_class('toggle-off')
-        self._write('thx', '1' if self._thx_on else '0')
+        self._set_thx(not self._thx_on)
+
+    def _set_thx_btn_markup(self, on):
+        """Two-line THX button label: bold current state on top, a small
+        'Click to change' hint underneath — text color tracks whichever of
+        toggle-on/toggle-off is on the button (no color set here) so it
+        stays in sync with the button's own on/off styling."""
+        state = 'THX Active' if on else 'Stereo Active'
+        self._thx_btn_lbl.set_markup(f'<b>{state}</b>\n<small>Click to change</small>')
+
+    def _set_thx(self, on):
+        """Turn THX-style virtual surround on/off (see lynapse/_thx.py).
+        Gates on _thx.components_installed() — if the required HRIR file
+        isn't present, shows a status message pointing at THX_SETUP.md and
+        leaves _thx_on/the device untouched. Threaded because turning on can
+        block ~1-2s (a PipeWire restart) the first time or after a change.
+        Shared by the button click handler and _tray_set_thx (used by
+        profile restore) so both go through the same gate."""
+        if not _thx.components_installed():
+            self._status_label.set_text(
+                "THX Spatial Audio isn't set up — see THX_SETUP.md "
+                f"(https://github.com/{_update_check.REPO}/blob/main/THX_SETUP.md) "
+                "to install the required component")
+            return
+        if hasattr(self, '_thx_btn'):
+            self._thx_btn.set_sensitive(False)
+        self._status_label.set_text(
+            'Turning THX Spatial Audio on…' if on else 'Turning THX Spatial Audio off…')
+
+        def _worker():
+            ok, err = _thx.enable() if on else _thx.disable()
+
+            def _done():
+                if hasattr(self, '_thx_btn'):
+                    self._thx_btn.set_sensitive(True)
+                if ok:
+                    self._thx_on = on
+                    if hasattr(self, '_thx_btn'):
+                        self._thx_btn.remove_css_class('toggle-off' if on else 'toggle-on')
+                        self._thx_btn.add_css_class('toggle-on' if on else 'toggle-off')
+                        self._set_thx_btn_markup(on)
+                    self._write('thx', '1' if on else '0')
+                    self._status_label.set_text(
+                        'THX Spatial Audio on' if on else 'THX Spatial Audio off')
+                else:
+                    self._status_label.set_text(f'THX Spatial Audio: {err}')
+                return False
+            GLib.idle_add(_done)
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _on_preset(self, btn, name):
         # Update button highlight first and let GTK paint it before doing

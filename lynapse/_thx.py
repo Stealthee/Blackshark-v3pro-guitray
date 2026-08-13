@@ -53,28 +53,38 @@ context.modules = [
                     { type = builtin label = convolver name = convR_R config = { filename = "__IR_FILE__" channel = 7 } }
                     { type = builtin label = convolver name = convR_L config = { filename = "__IR_FILE__" channel = 8 } }
 
-                    # Makeup gain, calibrated to a measured +4.3dB *net*
-                    # over an unprocessed bypass signal (pink noise,
-                    # WASAPI-loopback-style A/B via parecord+ffmpeg
-                    # astats on this exact graph) — NOT a naive linear
-                    # multiplier on top of unity. Each mixer here sums two
+                    # Makeup gain. "Gain N" here is NOT a naive linear
+                    # multiplier on top of unity — each mixer sums two
                     # already-attenuated convolver paths (this-ear + cross-
-                    # ear HRIR), and the pair's *combined* level at
+                    # ear HRIR), and that pair's *combined* level at
                     # "Gain N" = 1.0 measures ~6dB quieter than a raw
-                    # bypass to begin with, so "Gain N" = G empirically
-                    # nets out to ~G/2x bypass, not Gx. (First two attempts
-                    # at this feature used the naive model — 1.4 then
-                    # 1.96 — and both landed within ~0.2dB of bypass, i.e.
-                    # audibly unchanged, which is exactly the "no
-                    # difference between on and off" bug this fixes.) 3.17
-                    # nets +4.3dB with ~1dB of headroom left on this test
-                    # tone; Windows Synapse itself measured ~+10.9dB (see
-                    # docs/synapse_thx_capture.md) but that was pink noise
-                    # too, and real program material's peaks eat into
-                    # headroom faster than a continuous tone's — tune by
-                    # ear/check for clipping before pushing this higher.
-                    { type = builtin label = mixer name = mixL control = { "Gain 1" = 3.17 "Gain 2" = 3.17 } }
-                    { type = builtin label = mixer name = mixR control = { "Gain 1" = 3.17 "Gain 2" = 3.17 } }
+                    # bypass signal to begin with, so "Gain N" = G
+                    # empirically nets out to ~G/2x bypass, not Gx.
+                    # (Measured via parecord capturing the game sink's
+                    # monitor while playing a pink-noise tone through vs
+                    # around the effect, compared with ffmpeg astats/raw
+                    # audioop peak-RMS — first two attempts at this used
+                    # the naive model, 1.4 then 1.96, and both landed
+                    # within ~0.2dB of bypass, i.e. audibly unchanged.)
+                    #
+                    # 4.8 targets the midpoint between the previous
+                    # measured +4.3dB and Windows Synapse's own measured
+                    # +10.9dB (docs/synapse_thx_capture.md) — netting
+                    # ~+7.6dB. This EXCEEDS the ~5dB of headroom a
+                    # pink-noise bypass tone has before 0dBFS on this
+                    # graph (confirmed clipping in testing), so expect
+                    # occasional clipping on sustained loud/broadband
+                    # passages until this is dialed back or a proper
+                    # limiter is added — filter-chain's builtin node set
+                    # has no limiter/compressor (only a plain "clamp",
+                    # which just moves where the hard-clip happens rather
+                    # than smoothing it, so wasn't worth adding). Real
+                    # program material's higher crest factor may tolerate
+                    # this better than the pink-noise worst case, but
+                    # listen for harshness on loud content before trusting
+                    # this value.
+                    { type = builtin label = mixer name = mixL control = { "Gain 1" = 4.8 "Gain 2" = 4.8 } }
+                    { type = builtin label = mixer name = mixR control = { "Gain 1" = 4.8 "Gain 2" = 4.8 } }
 
                     # Mild warming tilt to match the ~2.5-2.9dB high-mid/air
                     # roll-off measured against Synapse's real THX (same

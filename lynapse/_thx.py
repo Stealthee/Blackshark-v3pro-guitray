@@ -53,17 +53,28 @@ context.modules = [
                     { type = builtin label = convolver name = convR_R config = { filename = "__IR_FILE__" channel = 7 } }
                     { type = builtin label = convolver name = convR_L config = { filename = "__IR_FILE__" channel = 8 } }
 
-                    # ~+5.8dB makeup gain (applied as a linear multiplier on
-                    # both mixer inputs, so it scales the whole summed
-                    # signal) — a second +3dB-ish bump stacked on the first
-                    # (1.4 -> 1.96), same size step as last time, by ear.
-                    # Windows Synapse's real THX measured ~+10.9dB on a
-                    # low-crest-factor test tone (see
-                    # docs/synapse_thx_capture.md), but that number came
-                    # from pink noise, not program material — still leaving
-                    # headroom against that ceiling rather than matching it.
-                    { type = builtin label = mixer name = mixL control = { "Gain 1" = 1.96 "Gain 2" = 1.96 } }
-                    { type = builtin label = mixer name = mixR control = { "Gain 1" = 1.96 "Gain 2" = 1.96 } }
+                    # Makeup gain, calibrated to a measured +4.3dB *net*
+                    # over an unprocessed bypass signal (pink noise,
+                    # WASAPI-loopback-style A/B via parecord+ffmpeg
+                    # astats on this exact graph) — NOT a naive linear
+                    # multiplier on top of unity. Each mixer here sums two
+                    # already-attenuated convolver paths (this-ear + cross-
+                    # ear HRIR), and the pair's *combined* level at
+                    # "Gain N" = 1.0 measures ~6dB quieter than a raw
+                    # bypass to begin with, so "Gain N" = G empirically
+                    # nets out to ~G/2x bypass, not Gx. (First two attempts
+                    # at this feature used the naive model — 1.4 then
+                    # 1.96 — and both landed within ~0.2dB of bypass, i.e.
+                    # audibly unchanged, which is exactly the "no
+                    # difference between on and off" bug this fixes.) 3.17
+                    # nets +4.3dB with ~1dB of headroom left on this test
+                    # tone; Windows Synapse itself measured ~+10.9dB (see
+                    # docs/synapse_thx_capture.md) but that was pink noise
+                    # too, and real program material's peaks eat into
+                    # headroom faster than a continuous tone's — tune by
+                    # ear/check for clipping before pushing this higher.
+                    { type = builtin label = mixer name = mixL control = { "Gain 1" = 3.17 "Gain 2" = 3.17 } }
+                    { type = builtin label = mixer name = mixR control = { "Gain 1" = 3.17 "Gain 2" = 3.17 } }
 
                     # Mild warming tilt to match the ~2.5-2.9dB high-mid/air
                     # roll-off measured against Synapse's real THX (same

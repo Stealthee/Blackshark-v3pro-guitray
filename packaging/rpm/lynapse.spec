@@ -1,5 +1,5 @@
 Name:           lynapse
-Version:        0.1.11
+Version:        0.1.12
 Release:        1%{?dist}
 Summary:        Lynapse — GTK4 control panel for the Razer BlackShark V3 headset
 
@@ -45,6 +45,13 @@ install -Dm644 data/lynapse.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/a
 %{_datadir}/icons/hicolor/scalable/apps/lynapse.svg
 
 %changelog
+* Thu Aug 13 2026 Mehmet Bayoglu - 0.1.12-1
+- THX Spatial Audio: fix makeup-gain calibration -- the mixer's "Gain N"
+  control isn't a linear multiplier the way it was assumed to be; the
+  previous two gain bumps (1.4, then 1.96) both landed within ~0.2dB of
+  an unprocessed bypass signal, i.e. audibly unchanged, confirmed via
+  live A/B measurement. Recalibrated to a measured +4.3dB net.
+
 * Thu Aug 13 2026 Mehmet Bayoglu - 0.1.11-1
 - THX Spatial Audio: fix streams that start/reconnect to the game sink
   after the toggle-time sweep window never getting the effect applied

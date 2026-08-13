@@ -1,3 +1,15 @@
+lynapse (0.1.12-1) unstable; urgency=medium
+
+  * THX Spatial Audio: fix makeup-gain calibration -- the mixer's
+    "Gain N" control isn't a linear multiplier the way it was assumed
+    to be; the previous two gain bumps (1.4, then 1.96) both landed
+    within ~0.2dB of an unprocessed bypass signal, i.e. audibly
+    unchanged, confirmed via live A/B measurement (parecord + ffmpeg
+    astats against the actual PipeWire graph). Recalibrated to a
+    measured +4.3dB net over bypass.
+
+ -- Mehmet Bayoglu <noreply@example.com>  Thu, 13 Aug 2026 18:30:00 -0500
+
 lynapse (0.1.11-1) unstable; urgency=medium
 
   * THX Spatial Audio: fix streams that start/reconnect to the game sink

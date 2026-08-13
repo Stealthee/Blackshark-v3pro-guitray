@@ -53,16 +53,17 @@ context.modules = [
                     { type = builtin label = convolver name = convR_R config = { filename = "__IR_FILE__" channel = 7 } }
                     { type = builtin label = convolver name = convR_L config = { filename = "__IR_FILE__" channel = 8 } }
 
-                    # +3dB makeup gain (applied as a linear multiplier on
+                    # ~+5.8dB makeup gain (applied as a linear multiplier on
                     # both mixer inputs, so it scales the whole summed
-                    # signal). Windows Synapse's real THX measured ~+10.9dB
-                    # on a low-crest-factor test tone (see
+                    # signal) — a second +3dB-ish bump stacked on the first
+                    # (1.4 -> 1.96), same size step as last time, by ear.
+                    # Windows Synapse's real THX measured ~+10.9dB on a
+                    # low-crest-factor test tone (see
                     # docs/synapse_thx_capture.md), but that number came
-                    # from pink noise, not program material — start
-                    # conservative here to leave headroom against clipping
-                    # on real audio and tune by ear from there.
-                    { type = builtin label = mixer name = mixL control = { "Gain 1" = 1.4 "Gain 2" = 1.4 } }
-                    { type = builtin label = mixer name = mixR control = { "Gain 1" = 1.4 "Gain 2" = 1.4 } }
+                    # from pink noise, not program material — still leaving
+                    # headroom against that ceiling rather than matching it.
+                    { type = builtin label = mixer name = mixL control = { "Gain 1" = 1.96 "Gain 2" = 1.96 } }
+                    { type = builtin label = mixer name = mixR control = { "Gain 1" = 1.96 "Gain 2" = 1.96 } }
 
                     # Mild warming tilt to match the ~2.5-2.9dB high-mid/air
                     # roll-off measured against Synapse's real THX (same

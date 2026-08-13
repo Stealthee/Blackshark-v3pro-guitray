@@ -1,3 +1,10 @@
+lynapse (0.1.10-1) unstable; urgency=medium
+
+  * THX Spatial Audio: stack a second gain bump on the convolver graph
+    (~+3dB more on top of the previous bump, same size step).
+
+ -- Mehmet Bayoglu <noreply@example.com>  Thu, 13 Aug 2026 17:30:00 -0500
+
 lynapse (0.1.9-1) unstable; urgency=medium
 
   * THX Spatial Audio: tune the PipeWire convolver graph with a modest

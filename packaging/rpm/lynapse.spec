@@ -1,5 +1,5 @@
 Name:           lynapse
-Version:        0.1.9
+Version:        0.1.10
 Release:        1%{?dist}
 Summary:        Lynapse — GTK4 control panel for the Razer BlackShark V3 headset
 
@@ -45,6 +45,10 @@ install -Dm644 data/lynapse.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/a
 %{_datadir}/icons/hicolor/scalable/apps/lynapse.svg
 
 %changelog
+* Thu Aug 13 2026 Mehmet Bayoglu - 0.1.10-1
+- THX Spatial Audio: stack a second gain bump on the convolver graph
+  (~+3dB more, same size step as the previous bump)
+
 * Thu Aug 13 2026 Mehmet Bayoglu - 0.1.9-1
 - THX Spatial Audio: tune the PipeWire convolver graph with a modest
   output gain stage and a ~2.5dB high-shelf cut above 2.5kHz, informed by

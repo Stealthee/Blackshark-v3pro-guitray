@@ -1,3 +1,11 @@
+lynapse (0.1.9-1) unstable; urgency=medium
+
+  * THX Spatial Audio: tune the PipeWire convolver graph with a modest
+    output gain stage and a ~2.5dB high-shelf cut above 2.5kHz, informed
+    by a Windows Synapse THX audio A/B capture.
+
+ -- Mehmet Bayoglu <noreply@example.com>  Thu, 13 Aug 2026 17:00:00 -0500
+
 lynapse (0.1.2-1) unstable; urgency=medium
 
   * Fix battery-trend charging override not surviving an app restart.

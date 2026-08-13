@@ -53,8 +53,23 @@ context.modules = [
                     { type = builtin label = convolver name = convR_R config = { filename = "__IR_FILE__" channel = 7 } }
                     { type = builtin label = convolver name = convR_L config = { filename = "__IR_FILE__" channel = 8 } }
 
-                    { type = builtin label = mixer name = mixL }
-                    { type = builtin label = mixer name = mixR }
+                    # +3dB makeup gain (applied as a linear multiplier on
+                    # both mixer inputs, so it scales the whole summed
+                    # signal). Windows Synapse's real THX measured ~+10.9dB
+                    # on a low-crest-factor test tone (see
+                    # docs/synapse_thx_capture.md), but that number came
+                    # from pink noise, not program material — start
+                    # conservative here to leave headroom against clipping
+                    # on real audio and tune by ear from there.
+                    { type = builtin label = mixer name = mixL control = { "Gain 1" = 1.4 "Gain 2" = 1.4 } }
+                    { type = builtin label = mixer name = mixR control = { "Gain 1" = 1.4 "Gain 2" = 1.4 } }
+
+                    # Mild warming tilt to match the ~2.5-2.9dB high-mid/air
+                    # roll-off measured against Synapse's real THX (same
+                    # capture doc) — a slight high-shelf cut above the
+                    # presence region rather than a boost anywhere.
+                    { type = builtin label = bq_highshelf name = shelfL control = { "Freq" = 2500.0 "Q" = 0.707 "Gain" = -2.5 } }
+                    { type = builtin label = bq_highshelf name = shelfR control = { "Freq" = 2500.0 "Q" = 0.707 "Gain" = -2.5 } }
                 ]
                 links = [
                     { output = "copyL:Out" input = "convL_L:In" }
@@ -66,9 +81,12 @@ context.modules = [
                     { output = "convR_L:Out" input = "mixL:In 2" }
                     { output = "convL_R:Out" input = "mixR:In 1" }
                     { output = "convR_R:Out" input = "mixR:In 2" }
+
+                    { output = "mixL:Out" input = "shelfL:In" }
+                    { output = "mixR:Out" input = "shelfR:In" }
                 ]
                 inputs  = [ "copyL:In" "copyR:In" ]
-                outputs = [ "mixL:Out" "mixR:Out" ]
+                outputs = [ "shelfL:Out" "shelfR:Out" ]
             }
             capture.props = {
                 node.name      = "effect_input.lynapse-thx"

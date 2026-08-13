@@ -149,6 +149,17 @@ def save_mic_eq_config(mic_eq_custom):
     data['mic_eq_custom'] = {str(k): v for k, v in mic_eq_custom.items()}
     _write_config(data)
 
+def load_profiles():
+    """Named full-settings snapshots (EQ + mic EQ + ANC + everything else),
+    used so multiple people (or one person with multiple setups) can save
+    and restore a complete headset configuration."""
+    return _read_config().get('profiles', {})
+
+def save_profiles(profiles):
+    data = _read_config()
+    data['profiles'] = profiles
+    _write_config(data)
+
 def load_state(pid):
     """Per-device state cache: feature → last-written string value.
     Used as fallback when the driver returns -1 (no SET this session)."""
@@ -421,6 +432,8 @@ class LynapseWindow(Gtk.ApplicationWindow):
         self._eq_apply_timer = None
         self._eq_custom = load_eq_config()
         self._mic_eq_custom = load_mic_eq_config()
+        self._profiles = load_profiles()
+        self._profile_switching = False
         self._connected_pid = self._device.pid if self._device else None
         self._mic_vol_slider = None
         self._ignore_slider = False
@@ -484,8 +497,9 @@ class LynapseWindow(Gtk.ApplicationWindow):
         self._bat_widget.set_valign(Gtk.Align.CENTER)
         self._sn_label = Gtk.Label(label='')
         self._sn_label.add_css_class('sn-label')
-        self._sn_label.set_margin_end(60)
+        self._sn_label.set_margin_end(16)
         self._bat_widget.append(self._sn_label)
+        self._bat_widget.append(self._build_profile_switcher())
         self._bat_label = Gtk.Label(label='')
         self._bat_label.add_css_class('value-label')
         self._bat_widget.append(self._bat_label)
@@ -639,6 +653,164 @@ class LynapseWindow(Gtk.ApplicationWindow):
         else:
             self._status_label.set_text(f'Resync failed: {err}')
         return False
+
+    # ── named profiles (full-settings snapshots) ────────────────────────────
+    # Lets multiple people — or one person with multiple setups — save the
+    # whole headset configuration under a name and restore it in one click.
+    # Reuses the _tray_set_* setters (each already does state + device write
+    # + widget update in one place) so applying a profile is just "call every
+    # setter with the saved value", no new write plumbing needed.
+
+    def _build_profile_switcher(self):
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        box.set_margin_end(20)
+        box.set_valign(Gtk.Align.CENTER)
+
+        self._profile_combo = Gtk.ComboBoxText()
+        self._profile_combo.set_size_request(130, -1)
+        self._profile_combo.append('', '— profile —')
+        for name in sorted(self._profiles):
+            self._profile_combo.append(name, name)
+        self._profile_combo.set_active_id('')
+        self._profile_combo.connect('changed', self._on_profile_selected)
+        box.append(self._profile_combo)
+
+        save_btn = Gtk.Button(label='Save')
+        save_btn.add_css_class('tv-btn')
+        save_btn.set_tooltip_text('Save current settings to the selected profile')
+        save_btn.connect('clicked', self._on_save_profile)
+        box.append(save_btn)
+
+        new_btn = Gtk.Button(label='+')
+        new_btn.add_css_class('tv-btn')
+        new_btn.set_tooltip_text('Save current settings as a new profile')
+        new_btn.connect('clicked', self._on_new_profile)
+        box.append(new_btn)
+
+        return box
+
+    def _snapshot_profile(self):
+        """Capture every setting this app manages, for saving under a name."""
+        return {
+            'eq_target_profile': self._eq_target_profile,
+            'eq_custom': {str(k): v for k, v in self._eq_custom.items()},
+            'mic_target_idx': self._mic_target_idx,
+            'mic_eq_custom': {str(k): v for k, v in self._mic_eq_custom.items()},
+            'anc_mode': getattr(self, '_anc_mode', 0),
+            'anc_level': getattr(self, '_anc_level', 1),
+            'thx_on': getattr(self, '_thx_on', False),
+            'ull_on': getattr(self, '_ull_on', True),
+            'gc_balance': getattr(self, '_gc_balance', 10),
+            'in_call_mix': getattr(self, '_in_call_mix', 0),
+            'audio_prompts': getattr(self, '_audio_prompts', True),
+            'sidetone_level': getattr(self, '_sidetone_level', 0),
+            'fn_mode': getattr(self, '_fn_mode', 1),
+            'pwr_timeout': getattr(self, '_pwr_timeout', 30),
+        }
+
+    def _apply_profile(self, name):
+        """Restore a saved snapshot: push every setting it contains to the
+        device (via the _tray_set_* setters) and update the GUI to match."""
+        prof = self._profiles.get(name)
+        if not prof:
+            return
+        if not self._device:
+            self._status_label.set_text(f"Can't apply profile '{name}' — device not found")
+            return
+        self._status_label.set_text(f"Applying profile '{name}'…")
+
+        if 'eq_custom' in prof:
+            self._eq_custom = {int(k): v for k, v in prof['eq_custom'].items()}
+            save_eq_config(self._eq_custom)
+        if 'mic_eq_custom' in prof:
+            self._mic_eq_custom = {int(k): v for k, v in prof['mic_eq_custom'].items()}
+            save_mic_eq_config(self._mic_eq_custom)
+
+        if self._has('eq'):
+            self._tray_set_eq_preset(prof.get('eq_target_profile', 0))
+        if self._has('mic_eq_preset'):
+            self._tray_set_mic_preset(prof.get('mic_target_idx', 0))
+        if self._has('anc'):
+            self._tray_set_anc(prof.get('anc_mode', 0), prof.get('anc_level', 1))
+        if self._has('thx'):
+            self._tray_set_thx(prof.get('thx_on', False))
+        if self._has('ull'):
+            self._tray_set_ull(prof.get('ull_on', True))
+        if self._has('game_chat'):
+            self._tray_set_game_chat(prof.get('gc_balance', 10))
+        if self._has('in_call_mix'):
+            self._tray_set_in_call_mix(prof.get('in_call_mix', 0))
+        if self._has('audio_prompts'):
+            self._tray_set_audio_prompts(prof.get('audio_prompts', True))
+        if self._has('sidetone'):
+            self._tray_set_sidetone(prof.get('sidetone_level', 0))
+        if self._has('audio_fn_button'):
+            self._tray_set_fn_mode(prof.get('fn_mode', 1))
+        if self._has('power_save'):
+            self._tray_set_pwr_timeout(prof.get('pwr_timeout', 30))
+
+        self._status_label.set_text(f"Profile '{name}' applied")
+
+    def _on_profile_selected(self, combo):
+        if self._profile_switching:
+            return
+        name = combo.get_active_id()
+        if not name:
+            return
+        self._apply_profile(name)
+
+    def _on_save_profile(self, btn):
+        name = self._profile_combo.get_active_id()
+        if not name:
+            self._on_new_profile(btn)
+            return
+        self._profiles[name] = self._snapshot_profile()
+        save_profiles(self._profiles)
+        self._status_label.set_text(f"Saved current settings to profile '{name}'")
+
+    def _on_new_profile(self, btn):
+        dialog = Gtk.Window(title='New Profile', transient_for=self, modal=True)
+        dialog.set_default_size(300, -1)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        box.set_margin_top(16); box.set_margin_bottom(16)
+        box.set_margin_start(16); box.set_margin_end(16)
+        dialog.set_child(box)
+
+        lbl = Gtk.Label(label='Profile name:')
+        lbl.set_halign(Gtk.Align.START)
+        box.append(lbl)
+
+        entry = Gtk.Entry()
+        box.append(entry)
+
+        btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        btn_row.set_halign(Gtk.Align.END)
+        cancel_btn = Gtk.Button(label='Cancel')
+        cancel_btn.connect('clicked', lambda _b: dialog.destroy())
+        create_btn = Gtk.Button(label='Create')
+
+        def _create(_w=None):
+            name = entry.get_text().strip()
+            if not name:
+                return
+            is_new = name not in self._profiles
+            self._profiles[name] = self._snapshot_profile()
+            save_profiles(self._profiles)
+            if is_new:
+                self._profile_combo.append(name, name)
+            self._profile_switching = True
+            self._profile_combo.set_active_id(name)
+            self._profile_switching = False
+            self._status_label.set_text(f"Saved current settings to new profile '{name}'")
+            dialog.destroy()
+
+        create_btn.connect('clicked', _create)
+        entry.connect('activate', _create)
+        btn_row.append(cancel_btn); btn_row.append(create_btn)
+        box.append(btn_row)
+
+        dialog.present()
+        entry.grab_focus()
 
     # ── live sync (on-board button changes → UI) ─────────────────────────────
     # Only cache-backed attrs are polled here. Reading these returns the value
@@ -875,6 +1047,30 @@ class LynapseWindow(Gtk.ApplicationWindow):
                 self._ull_btn.set_label('Turn On')
                 self._ull_btn.remove_css_class('toggle-on')
                 self._ull_btn.add_css_class('toggle-off')
+
+    def _tray_set_thx(self, on):
+        self._thx_on = on
+        self._write('thx', '1' if on else '0')
+        if hasattr(self, '_thx_btn'):
+            self._thx_btn.set_label('THX SPATIAL AUDIO' if on else 'STEREO')
+            self._thx_btn.remove_css_class('toggle-off' if on else 'toggle-on')
+            self._thx_btn.add_css_class('toggle-on' if on else 'toggle-off')
+
+    def _tray_set_in_call_mix(self, mode):
+        self._in_call_mix = mode
+        self._write('in_call_mix', str(mode))
+        if hasattr(self, '_ic_btns'):
+            for m, b in self._ic_btns.items():
+                if m == mode: b.add_css_class('active')
+                else: b.remove_css_class('active')
+
+    def _tray_set_audio_prompts(self, on):
+        self._audio_prompts = on
+        self._write('audio_prompts', '1' if on else '0')
+        if hasattr(self, '_ap_btn'):
+            self._ap_btn.set_label('ON' if on else 'OFF')
+            self._ap_btn.remove_css_class('toggle-off' if on else 'toggle-on')
+            self._ap_btn.add_css_class('toggle-on' if on else 'toggle-off')
 
     def _tray_set_fn_mode(self, mode):
         self._fn_mode = mode

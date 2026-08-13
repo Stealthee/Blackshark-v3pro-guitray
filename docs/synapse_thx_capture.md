@@ -113,14 +113,63 @@ contradicts that split, or suggests there's a second, undiscovered
 device-side command Synapse sends that the existing attribute doesn't
 already cover.
 
+## Audio-side characterization: what THX actually does to the signal
+
+Separate from the protocol question, also did a black-box before/after
+comparison of the *audio itself* — WASAPI-loopback-recorded the headset's
+render endpoint while playing an 8s pink-noise test tone, once with THX
+off and once on (same tone, same output device, playback pre-warmed a few
+seconds before recording started so there's no cold-start silence
+skewing the numbers). This deliberately stops at characterizing the
+effect (gain / EQ shape / stereo decorrelation) — not at recovering THX's
+actual HRTF impulse response or upmix matrix via sweep deconvolution,
+which would cross into reproducing its proprietary DSP rather than just
+describing what a black box does; that's out of scope the same way
+disassembling the service binary would be.
+
+Test tone: `anoisesrc=color=pink`, generated with **L and R exactly
+identical** — confirmed via a Mid/Side split (Side channel measured
+literal digital silence, `-inf`dB, with THX off). That makes the tone a
+clean control: any Side-channel energy that shows up with THX on can only
+have come from THX's own processing, not the source.
+
+Results (relative, THX on vs off):
+
+- **Overall gain: +10.9dB RMS / +10.7dB peak.** THX makes program audio
+  meaningfully louder outright, not just "more spatial."
+- **Mild high-frequency roll-off relative to that gain** — after
+  subtracting the overall +10.9dB, bass/low-mid/mid bands land within
+  ~0.5dB of each other (i.e. flat), but high-mid (2.5–6kHz) and air
+  (6–16kHz) come in **~2.5–2.9dB lower** than the rest. A modest overall
+  "warming" tilt on top of the gain, not a dramatic one.
+- **Real stereo decorrelation.** Side-channel level went from `-inf`dB
+  (off) to a measurable −33.9dB (on), about 18.6dB below the Mid channel.
+  Since the source had zero inherent channel difference, this can only be
+  THX's own doing — confirms it's genuinely decorrelating L/R (HRTF/
+  crossfeed-style widening), not just an EQ+volume trick layered on an
+  unchanged stereo image. That's the same category of effect the PipeWire
+  convolver already applies, which is a good sign the general approach is
+  right.
+
+Caveat: this is one paired measurement with a synthetic tone, not
+repeated trials across program material — trust the *direction* of each
+effect more than the exact dB figures. In particular, don't hardcode
++10.9dB of makeup gain against real music without checking headroom /
+clipping first; that number came from a low-crest-factor noise signal and
+real content will hit ceilings sooner.
+
 ## Bottom line for `_thx.py`
 
-No changes indicated. The current approach — send the existing
-`v3pro_thx_spatial_audio` HID toggle, then do the real spatialization work
-in a PipeWire HRTF convolver — appears to already match what Synapse
-itself does on Windows (existing device toggle + a separate software DSP
-stage), rather than being a compromise standing in for a fuller
-device-side protocol we haven't found yet.
+No protocol changes indicated — see above, the existing
+`v3pro_thx_spatial_audio` HID toggle + PipeWire HRTF convolver split
+already matches what Synapse does on Windows (device toggle + separate
+software DSP stage).
+
+Worth trying, informed by the audio characterization: add a modest output
+gain stage to the convolver chain (start conservative — a few dB, tune by
+ear/headroom rather than targeting +10.9dB literally) and a slight
+high-shelf cut of ~2–3dB above roughly 2.5kHz. Both are just tone/gain
+tweaks on the existing filter-chain graph in `_thx.py`, not a redesign.
 
 ## Raw capture files
 
@@ -129,9 +178,11 @@ the full session context). Left on the Windows machine at:
 
 ```
 C:\Users\Joes\AppData\Local\Temp\claude\C--Users-Joes\4510ce25-3747-4036-a3b2-1b66ff2f5565\scratchpad\usb_captures\
-  usbpcap1_20260813_160341.pcapng   (clean, keypress-gated run — the one referenced above)
+  usbpcap1_20260813_160341.pcapng   (clean, keypress-gated USB run — the one referenced above)
   usbpcap2_20260813_160341.pcapng   (idle throughout, included for completeness)
-  timeline_20260813_160341.log      (wall-clock log of each keypress)
+  timeline_20260813_160341.log      (wall-clock log of each USB-capture keypress)
+  test_signal.wav                   (the pink-noise test tone used for the audio comparison)
+  thx_OFF2.wav / thx_ON2.wav        (WASAPI loopback recordings, pre-warmed playback — the pair referenced above)
 ```
 
 That's a Temp directory tied to this Claude Code session, so treat it as

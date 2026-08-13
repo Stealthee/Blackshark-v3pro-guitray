@@ -75,6 +75,123 @@ it's missing instead of silently doing nothing.
   The filter-chain config is left in place (it's idle/no-cost when unused)
   so turning on again later doesn't need another restart.
 
+## Doing this yourself, without Lynapse (any Linux headset)
+
+None of this is Lynapse-specific — it's stock PipeWire plus a public HRIR
+file, so it works for any headset/headphones on any Linux desktop. Here's
+the recipe Lynapse itself automates, if you'd rather wire it up by hand or
+adapt it for a device Lynapse doesn't support.
+
+**1. Get a HeSuVi-format HRIR/BRIR WAV file.** This is the actual "ears" —
+a set of measured (or modeled) head-related impulse responses, one pair
+per speaker position, in a standardized 14-channel layout. Sources:
+- [IrateGoose's linked collection](https://airtable.com/appayGNkn3nSuXkaz/shruimhjdSakUPg2m/tbloLjoZKWJDnLtTc)
+- HeSuVi's own bundle (`HeSuVi/Common/*.wav`, from a Windows/Wine HeSuVi install)
+
+**2. Find your headphone sink's exact PipeWire name:**
+```sh
+pactl list sinks short
+```
+Look for your device (usually an `alsa_output.usb-...` or
+`alsa_output.pci-...` line) and copy its full name.
+
+**3. Write a filter-chain config** at
+`~/.config/pipewire/pipewire.conf.d/60-my-thx.conf` (any filename ending
+`.conf` works). This is the minimal 2-channel binaural version — plain
+stereo audio in, both ears' direct + crossfeed HRIR response applied, no
+upmixing needed:
+
+```
+context.modules = [
+    { name = libpipewire-module-filter-chain
+        flags = [ nofail ]
+        args = {
+            node.description = "My THX Surround"
+            media.name       = "My THX Surround"
+            filter.graph = {
+                nodes = [
+                    { type = builtin label = copy name = copyL }
+                    { type = builtin label = copy name = copyR }
+                    { type = builtin label = convolver name = convL_L config = { filename = "/path/to/your.wav" channel = 0 } }
+                    { type = builtin label = convolver name = convL_R config = { filename = "/path/to/your.wav" channel = 1 } }
+                    { type = builtin label = convolver name = convR_R config = { filename = "/path/to/your.wav" channel = 7 } }
+                    { type = builtin label = convolver name = convR_L config = { filename = "/path/to/your.wav" channel = 8 } }
+                    { type = builtin label = mixer name = mixL control = { "Gain 1" = 3.2 "Gain 2" = 3.2 } }
+                    { type = builtin label = mixer name = mixR control = { "Gain 1" = 3.2 "Gain 2" = 3.2 } }
+                ]
+                links = [
+                    { output = "copyL:Out" input = "convL_L:In" }
+                    { output = "copyL:Out" input = "convL_R:In" }
+                    { output = "copyR:Out" input = "convR_R:In" }
+                    { output = "copyR:Out" input = "convR_L:In" }
+                    { output = "convL_L:Out" input = "mixL:In 1" }
+                    { output = "convR_L:Out" input = "mixL:In 2" }
+                    { output = "convL_R:Out" input = "mixR:In 1" }
+                    { output = "convR_R:Out" input = "mixR:In 2" }
+                ]
+                inputs  = [ "copyL:In" "copyR:In" ]
+                outputs = [ "mixL:Out" "mixR:Out" ]
+            }
+            capture.props = {
+                node.name      = "effect_input.my-thx"
+                media.class    = Audio/Sink
+                audio.channels = 2
+                audio.position = [ FL FR ]
+            }
+            playback.props = {
+                node.name      = "effect_output.my-thx"
+                node.passive   = true
+                audio.channels = 2
+                audio.position = [ FL FR ]
+                target.object  = "your-headphone-sink-name-from-step-2"
+            }
+        }
+    }
+]
+```
+
+**4. Load it:**
+```sh
+systemctl --user restart pipewire pipewire-pulse
+```
+A new sink called `effect_input.my-thx` should appear in `pactl list sinks
+short`. Set it as your output (system settings, or `pactl set-default-sink
+effect_input.my-thx`), or move a specific app's stream onto it with
+`pactl move-sink-input <id> effect_input.my-thx`.
+
+**Gotcha — the makeup-gain math is not what it looks like.** The `mixer`
+node's `"Gain N"` control is *not* a plain linear multiplier on an
+otherwise-unprocessed signal — each mixer here sums two already-attenuated
+convolver paths, and that summed pair measures roughly **half** as loud as
+an unprocessed bypass signal at `Gain N = 1.0`. In other words, `Gain N =
+G` nets out to about `G/2`x of bypass volume, not `G`x. This bit us twice
+while tuning Lynapse's own version — a couple of "obviously enough" gain
+values turned out to change nothing audible. If you're tuning this by
+ear, don't trust the number alone: A/B it against a bypass sink with
+something like
+```sh
+parecord --device=your-sink.monitor --file-format=wav /tmp/test.wav
+```
+(once with your player pointed at the effect sink, once at the raw
+device) and compare loudness, rather than assuming the config value maps
+linearly.
+
+**Full 7.1/8-channel version:** only worth it if your actual source audio
+is genuinely multichannel (e.g. a game outputting real 7.1 PCM, or a
+custom multichannel test file) — ordinary stereo game/movie/browser audio
+never has independent content on the side/rear channels, so an 8-input
+graph fed 2-channel source just leaves 6 inputs silent and sounds thinner,
+not more spatial. If you do have real multichannel source, the working
+reference is
+[`sink-virtual-surround-7.1-hesuvi.conf`](https://gitlab.freedesktop.org/pipewire/pipewire/-/blob/master/src/daemon/filter-chain/sink-virtual-surround-7.1-hesuvi.conf)
+(ships with PipeWire itself, under `/usr/share/pipewire/filter-chain/` on
+most distros) — same idea, one convolver pair per speaker position instead
+of two.
+
+Lynapse's own implementation (`lynapse/_thx.py` in this repo) is a working,
+tested reference for all of the above if you want a complete example to
+copy from, including the game/chat-sink-scoping and stream-move logic.
+
 ## Troubleshooting
 
 - **"THX Spatial Audio isn't set up"** — the IR file isn't at

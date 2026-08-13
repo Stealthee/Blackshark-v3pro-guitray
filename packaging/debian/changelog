@@ -1,3 +1,16 @@
+lynapse (0.1.14-1) unstable; urgency=medium
+
+  * Add THX Spatial Audio toggle to the tray right-click menu and the
+    quick-settings popup, same setup gate as the main window (fires a
+    desktop notification pointing at THX_SETUP.md when not configured).
+  * Wire up the tray icon's left-click to actually show the quick-
+    settings popup (was fully built but never connected -- left-click
+    opened the full window instead).
+  * Add drag-to-reorder + a lock/unlock row to the quick-settings
+    popup, order and lock state persisted across restarts.
+
+ -- Mehmet Bayoglu <noreply@example.com>  Thu, 13 Aug 2026 20:00:00 -0500
+
 lynapse (0.1.13-1) unstable; urgency=medium
 
   * THX Spatial Audio: push makeup gain to the midpoint between the

@@ -1,5 +1,5 @@
 Name:           lynapse
-Version:        0.1.13
+Version:        0.1.14
 Release:        1%{?dist}
 Summary:        Lynapse — GTK4 control panel for the Razer BlackShark V3 headset
 
@@ -45,6 +45,16 @@ install -Dm644 data/lynapse.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/a
 %{_datadir}/icons/hicolor/scalable/apps/lynapse.svg
 
 %changelog
+* Thu Aug 13 2026 Mehmet Bayoglu - 0.1.14-1
+- Add THX Spatial Audio toggle to the tray right-click menu and the
+  quick-settings popup, same setup gate as the main window (fires a
+  desktop notification pointing at THX_SETUP.md when not configured)
+- Wire up the tray icon's left-click to actually show the quick-
+  settings popup (was fully built but never connected -- left-click
+  opened the full window instead)
+- Add drag-to-reorder + a lock/unlock row to the quick-settings popup,
+  order and lock state persisted across restarts
+
 * Thu Aug 13 2026 Mehmet Bayoglu - 0.1.13-1
 - THX Spatial Audio: push makeup gain to the midpoint between the
   previous +4.3dB and Windows Synapse's measured +10.9dB (~+7.6dB net,

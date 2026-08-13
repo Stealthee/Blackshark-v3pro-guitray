@@ -3,7 +3,7 @@
 
 import gi
 gi.require_version('Gtk', '4.0')
-from gi.repository import Gtk, GLib, Gdk, Pango
+from gi.repository import Gtk, GLib, Gdk, Pango, Gio, GObject
 import glob, os, subprocess, json, threading, time, traceback
 from importlib.metadata import version as _pkg_version, PackageNotFoundError
 
@@ -161,6 +161,24 @@ def save_profiles(profiles):
     data['profiles'] = profiles
     _write_config(data)
 
+TRAY_SECTIONS = ('mic_eq', 'sidetone', 'thx')  # default/fallback order
+
+def load_tray_order():
+    """(order, locked) for the tray quick-popup's reorderable rows. order
+    is always a permutation of TRAY_SECTIONS — any saved id that's no
+    longer valid (e.g. a future rename) is dropped, and any missing one is
+    appended, so a corrupt/outdated save can't hide a row entirely."""
+    data = _read_config().get('tray_order', {})
+    saved = data.get('order', [])
+    order = [s for s in saved if s in TRAY_SECTIONS]
+    order += [s for s in TRAY_SECTIONS if s not in order]
+    return order, bool(data.get('locked', False))
+
+def save_tray_order(order, locked):
+    data = _read_config()
+    data['tray_order'] = {'order': list(order), 'locked': bool(locked)}
+    _write_config(data)
+
 def load_state(pid):
     """Per-device state cache: feature → last-written string value.
     Used as fallback when the driver returns -1 (no SET this session)."""
@@ -202,6 +220,12 @@ scale.vertical trough { min-width: 4px; min-height: 4px; }
 .tv-btn { background: #2a2a2a; color: #aaa; border: 1px solid #333; border-radius: 4px; padding: 6px 10px; font-size: 11px; }
 .tv-btn.active { background: #003a12; color: #00ff41; border-color: #00ff41; }
 .tv-step { background: #2a2a2a; color: #eee; border: 1px solid #444; border-radius: 4px; padding: 4px 14px; font-size: 14px; }
+.tv-list { background: transparent; }
+.tv-row { background: transparent; padding: 4px 0; }
+.tv-row:hover { background: alpha(#00ff41, 0.06); border-radius: 4px; }
+.tv-drag-handle { color: #666; font-size: 15px; padding: 0 6px 0 0; }
+.tv-lock-btn { background: #2a2a2a; color: #aaa; border: 1px solid #333; border-radius: 4px; padding: 4px 10px; font-size: 11px; }
+.tv-lock-btn.locked { color: #00ff41; border-color: #00ff41; }
 """
 
 def sysfs_path():
@@ -304,7 +328,10 @@ def sysfs_write(attr, value):
 
 
 class TrayView(Gtk.Window):
-    """Compact quick-settings popup — shown when tray icon is left-clicked."""
+    """Compact quick-settings popup — shown when tray icon is left-clicked.
+    The Mic EQ / Sidetone / THX rows are drag-reorderable (order + a lock
+    flag persist via load_tray_order()/save_tray_order()); Battery, the
+    lock toggle, and Open Full Window stay fixed in place."""
 
     def __init__(self, ctrl):
         super().__init__(title='Lynapse Quick')
@@ -313,6 +340,8 @@ class TrayView(Gtk.Window):
         self.set_resizable(False)
         self.set_deletable(True)
         self.connect('close-request', lambda w: w.hide() or True)
+
+        self._order, self._locked = load_tray_order()
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         outer.set_margin_top(14); outer.set_margin_bottom(14)
@@ -327,32 +356,140 @@ class TrayView(Gtk.Window):
 
         outer.append(Gtk.Separator())
 
-        # Mic EQ
-        meq_lbl = Gtk.Label(label='Mic EQ')
-        meq_lbl.set_halign(Gtk.Align.START)
-        meq_lbl.add_css_class('section-label')
-        outer.append(meq_lbl)
+        # Lock/unlock — a fixed row (not itself draggable) that gates
+        # whether the rows below can be dragged, so an accidental drag
+        # can't reshuffle things once you've got them how you want.
+        lock_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        lock_row.set_halign(Gtk.Align.CENTER)
+        self._lock_btn = Gtk.Button()
+        self._lock_btn.add_css_class('tv-lock-btn')
+        self._lock_btn.connect('clicked', self._on_lock_toggle)
+        lock_row.append(self._lock_btn)
+        outer.append(lock_row)
+        self._sync_lock_btn()
 
-        meq_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        outer.append(Gtk.Separator())
+
+        # Reorderable sections
+        self._list = Gtk.ListBox()
+        self._list.set_selection_mode(Gtk.SelectionMode.NONE)
+        self._list.add_css_class('tv-list')
+        for section_id in self._order:
+            self._list.append(self._build_row(section_id))
+        outer.append(self._list)
+
+        outer.append(Gtk.Separator())
+
+        # Open full window button
+        full_btn = Gtk.Button(label='Open Full Window')
+        full_btn.connect('clicked', lambda _: (self._ctrl.present(), self.hide()))
+        outer.append(full_btn)
+
+    # ── reorderable rows ─────────────────────────────────────────────────
+
+    def _build_row(self, section_id):
+        row = Gtk.ListBoxRow()
+        row.add_css_class('tv-row')
+        row._section_id = section_id  # tag read back on reorder to persist order
+
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        handle = Gtk.Label(label='⠿')
+        handle.add_css_class('tv-drag-handle')
+        handle.set_valign(Gtk.Align.CENTER)
+        box.append(handle)
+
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        content.set_hexpand(True)
+        {'mic_eq':   self._build_mic_eq_content,
+         'sidetone': self._build_sidetone_content,
+         'thx':      self._build_thx_content}[section_id](content)
+        box.append(content)
+        row.set_child(box)
+
+        # Drag source lives on the handle only, so the preset/step buttons
+        # inside each section stay normally clickable — only grabbing the
+        # handle starts a drag. Gated on self._locked so Lock actually
+        # prevents moves rather than just looking locked.
+        drag = Gtk.DragSource()
+        drag.set_actions(Gdk.DragAction.MOVE)
+        drag.connect('prepare', self._on_drag_prepare, row)
+        handle.add_controller(drag)
+
+        drop = Gtk.DropTarget.new(GObject.TYPE_INT, Gdk.DragAction.MOVE)
+        drop.connect('drop', self._on_drop, row)
+        row.add_controller(drop)
+
+        return row
+
+    def _on_drag_prepare(self, source, x, y, row):
+        if self._locked:
+            return None
+        return Gdk.ContentProvider.new_for_value(
+            GObject.Value(GObject.TYPE_INT, row.get_index()))
+
+    def _on_drop(self, target, value, x, y, row):
+        if self._locked:
+            return False
+        src_idx = int(value)
+        dst_idx = row.get_index()
+        if src_idx == dst_idx:
+            return False
+        src_row = self._list.get_row_at_index(src_idx)
+        self._list.remove(src_row)
+        if src_idx < dst_idx:
+            dst_idx -= 1   # removal shifted everything after it down by one
+        self._list.insert(src_row, dst_idx)
+        self._order = [r._section_id for r in self._iter_rows()]
+        save_tray_order(self._order, self._locked)
+        return True
+
+    def _iter_rows(self):
+        i = 0
+        while True:
+            row = self._list.get_row_at_index(i)
+            if row is None:
+                return
+            yield row
+            i += 1
+
+    def _on_lock_toggle(self, _btn):
+        self._locked = not self._locked
+        save_tray_order(self._order, self._locked)
+        self._sync_lock_btn()
+
+    def _sync_lock_btn(self):
+        self._lock_btn.set_label('🔒 Locked' if self._locked else '🔓 Unlocked — drag ⠿ to reorder')
+        if self._locked:
+            self._lock_btn.add_css_class('locked')
+        else:
+            self._lock_btn.remove_css_class('locked')
+
+    # ── section content builders ─────────────────────────────────────────
+
+    def _build_mic_eq_content(self, box):
+        lbl = Gtk.Label(label='Mic EQ')
+        lbl.set_halign(Gtk.Align.START)
+        lbl.add_css_class('section-label')
+        box.append(lbl)
+
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         self._meq_btns = {}
         for i, name in enumerate(MIC_EQ_PRESETS):
             btn = Gtk.Button(label=name)
             btn.add_css_class('tv-btn')
             btn.connect('clicked', self._on_meq, i)
-            meq_row.append(btn)
+            row.append(btn)
             self._meq_btns[i] = btn
-        outer.append(meq_row)
+        box.append(row)
 
-        outer.append(Gtk.Separator())
+    def _build_sidetone_content(self, box):
+        lbl = Gtk.Label(label='Sidetone')
+        lbl.set_halign(Gtk.Align.START)
+        lbl.add_css_class('section-label')
+        box.append(lbl)
 
-        # Sidetone
-        st_lbl = Gtk.Label(label='Sidetone')
-        st_lbl.set_halign(Gtk.Align.START)
-        st_lbl.add_css_class('section-label')
-        outer.append(st_lbl)
-
-        st_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        st_row.set_halign(Gtk.Align.CENTER)
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        row.set_halign(Gtk.Align.CENTER)
         st_minus = Gtk.Button(label='−')
         st_minus.add_css_class('tv-step')
         st_minus.connect('clicked', self._on_st, -1)
@@ -362,21 +499,37 @@ class TrayView(Gtk.Window):
         st_plus = Gtk.Button(label='+')
         st_plus.add_css_class('tv-step')
         st_plus.connect('clicked', self._on_st, +1)
-        st_row.append(st_minus); st_row.append(self._st_val); st_row.append(st_plus)
-        outer.append(st_row)
+        row.append(st_minus); row.append(self._st_val); row.append(st_plus)
+        box.append(row)
 
-        outer.append(Gtk.Separator())
+    def _build_thx_content(self, box):
+        lbl = Gtk.Label(label='THX Spatial Audio')
+        lbl.set_halign(Gtk.Align.START)
+        lbl.add_css_class('section-label')
+        box.append(lbl)
 
-        # Open full window button
-        full_btn = Gtk.Button(label='Open Full Window')
-        full_btn.connect('clicked', lambda _: (self._ctrl.present(), self.hide()))
-        outer.append(full_btn)
+        self._thx_btn = Gtk.Button()
+        self._thx_btn.add_css_class('tv-btn')
+        self._thx_btn.connect('clicked', self._on_thx)
+        box.append(self._thx_btn)
+        self._sync_thx_btn()
+
+    def _sync_thx_btn(self):
+        on = getattr(self._ctrl, '_thx_on', False)
+        self._thx_btn.set_label('Turn Off' if on else 'Turn On')
+
+    def _on_thx(self, _btn):
+        # Same gate as the main window's THX button and the tray's
+        # right-click menu item — see _set_thx() in app.py. Async
+        # (threaded), so the button label updates on the next refresh()
+        # once the real outcome (including the not-set-up case, which
+        # fires a desktop notification) comes back.
+        self._ctrl._tray_set_thx(not getattr(self._ctrl, '_thx_on', False))
 
     def refresh(self):
         pct = getattr(self._ctrl, '_last_pct', None)
         ch  = getattr(self._ctrl, '_last_charging', False)
         if pct is not None:
-            self._bat_lbl.set_text(f'⚡ {pct}%' if ch else f'{pct}%')
             self._bat_lbl.set_markup(
                 f'<span foreground="{"#32c850" if ch else "#1e78ff"}">'
                 f'{"⚡ " if ch else ""}{pct}%</span>')
@@ -391,6 +544,7 @@ class TrayView(Gtk.Window):
                 btn.remove_css_class('active')
 
         self._st_val.set_text(str(getattr(self._ctrl, '_sidetone_level', 0)))
+        self._sync_thx_btn()
 
     def _on_meq(self, btn, idx):
         ok, _ = self._ctrl._write('mic_eq_preset', str(idx))
@@ -990,13 +1144,27 @@ class LynapseWindow(Gtk.ApplicationWindow):
             sidetone_cb = self._tray_set_sidetone,
             anc_cb      = self._tray_set_anc,
             ull_cb      = self._tray_set_ull,
-            activate_cb = self.present,
+            activate_cb = self._on_tray_activate,
             fn_cb       = self._tray_set_fn_mode,
             eq_cb       = self._tray_set_eq_preset,
             pwr_cb      = self._tray_set_pwr_timeout,
             gc_cb       = self._tray_set_game_chat,
             resync_cb   = self._on_resync_clicked,
+            thx_cb      = self._tray_set_thx,
         ) or (_log('tray started') or False))
+
+    def _on_tray_activate(self):
+        """Left-click on the tray icon: toggle the compact quick-settings
+        popup (TrayView), created lazily on first use. The right-click
+        menu's 'Show Full Window' item still opens the full window via
+        show_cb — this is a separate, deliberately lighter-weight action."""
+        if self._tray_view is None:
+            self._tray_view = TrayView(self)
+        self._tray_view.refresh()
+        if self._tray_view.get_visible():
+            self._tray_view.hide()
+        else:
+            self._tray_view.present()
 
     def _tray_set_mic_preset(self, idx):
         self._mic_target_idx = idx
@@ -1124,6 +1292,8 @@ class LynapseWindow(Gtk.ApplicationWindow):
             pwr_timeout = getattr(self, '_pwr_timeout', 30),
             has_pwr     = self._has('power_save'),
             gc_balance  = getattr(self, '_gc_balance', 10),
+            thx_on      = getattr(self, '_thx_on',    False),
+            has_thx     = self._has('thx'),
         )
 
     def _update_tray(self, pct, charging):
@@ -1422,13 +1592,17 @@ class LynapseWindow(Gtk.ApplicationWindow):
         isn't present, shows a status message pointing at THX_SETUP.md and
         leaves _thx_on/the device untouched. Threaded because turning on can
         block ~1-2s (a PipeWire restart) the first time or after a change.
-        Shared by the button click handler and _tray_set_thx (used by
-        profile restore) so both go through the same gate."""
+        Shared by the button click handler, _tray_set_thx (tray menu item +
+        profile restore), so all three go through the same gate — the tray
+        path has no status label to read, so the "not set up" case also
+        fires a desktop notification there, not just the label update."""
         if not _thx.components_installed():
-            self._status_label.set_text(
-                "THX Spatial Audio isn't set up — see THX_SETUP.md "
-                f"(https://github.com/{_update_check.REPO}/blob/main/THX_SETUP.md) "
-                "to install the required component")
+            msg = ("THX Spatial Audio isn't set up — see THX_SETUP.md "
+                   f"(https://github.com/{_update_check.REPO}/blob/main/THX_SETUP.md) "
+                   "to install the required component")
+            self._status_label.set_text(msg)
+            self._notify_thx_not_setup()
+            self._update_tray_state()
             return
         if hasattr(self, '_thx_btn'):
             self._thx_btn.set_sensitive(False)
@@ -1452,10 +1626,26 @@ class LynapseWindow(Gtk.ApplicationWindow):
                         'THX Spatial Audio on' if on else 'THX Spatial Audio off')
                 else:
                     self._status_label.set_text(f'THX Spatial Audio: {err}')
+                self._update_tray_state()
                 return False
             GLib.idle_add(_done)
 
         threading.Thread(target=_worker, daemon=True).start()
+
+    def _notify_thx_not_setup(self):
+        """Desktop notification pointing at THX_SETUP.md — fired from
+        _set_thx's gate so the tray-only path (no visible status label)
+        still tells the user what's missing and where to fix it."""
+        try:
+            n = Gio.Notification.new("THX Spatial Audio isn't set up")
+            n.set_body(
+                "Lynapse needs a one-time extra component for this feature. "
+                f"See THX_SETUP.md at https://github.com/{_update_check.REPO} for setup instructions.")
+            app = self.get_application()
+            if app:
+                app.send_notification('thx-not-setup', n)
+        except Exception as e:
+            _log(f'thx notification failed: {e}')
 
     def _on_preset(self, btn, name):
         # Update button highlight first and let GTK paint it before doing

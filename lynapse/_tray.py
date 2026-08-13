@@ -285,6 +285,15 @@ class _MenuService(dbus.service.Object):
         if t._has_ull:
             extra.append(self._item(70, f'Turn {"Off" if t._ull_on else "On"} HyperSpeed'))
 
+        # THX Spatial Audio — plain item, same on/off-shows-next-action
+        # convention as HyperSpeed above. Unlike the others, the click
+        # handler doesn't optimistically flip _thx_on here: it's gated on
+        # a component being installed (see _set_thx in app.py), so the
+        # real state comes back via set_device_state() after the app
+        # actually confirms it, rather than being assumed here.
+        if t._has_thx:
+            extra.append(self._item(71, f'Turn {"Off" if t._thx_on else "On"} THX Spatial Audio'))
+
         # Audio function button — only when device supports it
         if t._has_fn:
             fn_items = [self._item(80+i, _sel(name, i == t._fn_mode))
@@ -398,6 +407,11 @@ class _MenuService(dbus.service.Object):
             t._ull_on = not t._ull_on
             self._bump()
             GLib.idle_add(t._ull_cb, t._ull_on)
+        elif id == 71 and t._thx_cb:
+            # No optimistic flip here (see _layout()) — just fire the
+            # request; the app calls set_device_state() with the real
+            # outcome once _set_thx()'s gate/worker actually resolves.
+            GLib.idle_add(t._thx_cb, not t._thx_on)
         elif 80 <= id <= 82 and t._fn_cb:
             t._fn_mode = int(id) - 80
             self._bump()
@@ -557,13 +571,16 @@ class BatteryTray:
         self._gc_cb          = None
         self._gc_balance     = 10
         self._resync_cb      = None
+        self._thx_cb         = None
+        self._thx_on         = False
+        self._has_thx        = False
         self._tray_view_mode = False
         self._update_version = None
         self._update_url     = None
 
     def start(self, show_cb=None, quit_cb=None, mic_cb=None,
               sidetone_cb=None, anc_cb=None, ull_cb=None, activate_cb=None, fn_cb=None,
-              eq_cb=None, pwr_cb=None, gc_cb=None, resync_cb=None):
+              eq_cb=None, pwr_cb=None, gc_cb=None, resync_cb=None, thx_cb=None):
         self._show_cb     = show_cb
         self._quit_cb     = quit_cb
         self._mic_cb      = mic_cb
@@ -576,6 +593,7 @@ class BatteryTray:
         self._pwr_cb      = pwr_cb
         self._gc_cb       = gc_cb
         self._resync_cb   = resync_cb
+        self._thx_cb      = thx_cb
         if not _DBUS_OK:
             return False
         try:
@@ -596,14 +614,16 @@ class BatteryTray:
 
     def set_device_state(self, mic_preset, sidetone, anc_mode=0, anc_level=1,
                          ull_on=False, has_anc=False, has_ull=False, fn_mode=1, has_fn=False,
-                         eq_preset=0, pwr_timeout=30, has_pwr=False, gc_balance=10):
+                         eq_preset=0, pwr_timeout=30, has_pwr=False, gc_balance=10,
+                         thx_on=False, has_thx=False):
         changed = (mic_preset != self._mic_preset or sidetone != self._sidetone
                    or anc_mode != self._anc_mode or anc_level != self._anc_level
                    or ull_on != self._ull_on or has_anc != self._has_anc
                    or has_ull != self._has_ull or fn_mode != self._fn_mode
                    or has_fn != self._has_fn or eq_preset != self._eq_preset
                    or pwr_timeout != self._pwr_timeout or has_pwr != self._has_pwr
-                   or gc_balance != self._gc_balance)
+                   or gc_balance != self._gc_balance or thx_on != self._thx_on
+                   or has_thx != self._has_thx)
         self._mic_preset  = mic_preset
         self._sidetone    = sidetone
         self._anc_mode    = anc_mode
@@ -617,6 +637,8 @@ class BatteryTray:
         self._pwr_timeout = pwr_timeout
         self._has_pwr     = has_pwr
         self._gc_balance  = gc_balance
+        self._thx_on      = thx_on
+        self._has_thx     = has_thx
         if changed and self._menu:
             self._menu._bump()
 

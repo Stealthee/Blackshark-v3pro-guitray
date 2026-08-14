@@ -40,6 +40,12 @@ def _gc_label(n):
         return f'G {n}'
     return '0'
 
+# Every tray menu item that TrayView's reorder popup can rearrange, in
+# fallback/default order. About and Quit are deliberately excluded — see
+# _MenuService._layout(), which pins them last, always in that order.
+REORDERABLE_ITEMS = ('show_full_window', 'eq', 'mic_eq', 'sidetone', 'anc',
+                      'ull', 'thx', 'fn', 'scroll', 'pwr', 'resync')
+
 def _log(msg):
     try:
         with open(_LOG, 'a') as f:
@@ -253,37 +259,37 @@ class _MenuService(dbus.service.Object):
         def _sel(label, active):
             return f'● {label}' if active else label
 
-        # Sound EQ submenu — bullet on current preset
+        # Every reorderable item, keyed by the same ids TrayView's reorder
+        # popup uses (see REORDERABLE_ITEMS/item_labels below) — order of
+        # construction here doesn't matter, only which ones end up in the
+        # `items` dict (device-capability-gated) and the order they're
+        # assembled into `children` in, driven by t._order.
+        items = {'show_full_window': self._item(10, 'Show Full Window')}
+
         eq_items = [self._item(110+i, _sel(name, i == t._eq_preset))
                     for i, name in enumerate(EQ_PRESETS)]
         cur_eq = EQ_PRESETS[t._eq_preset] if 0 <= t._eq_preset < len(EQ_PRESETS) else '?'
-        eq_menu = self._submenu(104, f'Sound EQ: {cur_eq}', eq_items)
+        items['eq'] = self._submenu(104, f'Sound EQ: {cur_eq}', eq_items)
 
-        # Mic EQ submenu — bullet on current preset
         mic_items = [self._item(30+i, _sel(name, i == t._mic_preset))
                      for i, name in enumerate(MIC_PRESETS)]
         cur_mic = MIC_PRESETS[t._mic_preset] if 0 <= t._mic_preset < len(MIC_PRESETS) else '?'
-        mic_menu = self._submenu(100, f'Mic EQ: {cur_mic}', mic_items)
+        items['mic_eq'] = self._submenu(100, f'Mic EQ: {cur_mic}', mic_items)
 
-        # Sidetone submenu — bullet on current level (0–15)
         st_items = [self._item(40+i, _sel(str(val), val == t._sidetone))
                     for i, (val, _) in enumerate(SIDETONE_LEVELS)]
-        st_menu = self._submenu(101, f'Sidetone: {t._sidetone}', st_items)
+        items['sidetone'] = self._submenu(101, f'Sidetone: {t._sidetone}', st_items)
 
-        extra = []
-
-        # ANC submenu — only when device supports it
         if t._has_anc:
             anc_items = [
                 self._item(60+off, _sel(label, t._anc_mode == m and (m != 1 or t._anc_level == lvl)))
                 for off, m, lvl, label in ANC_OPTIONS
             ]
-            cur_anc = _anc_cur_label(t._anc_mode, t._anc_level)
-            extra.append(self._submenu(102, f'ANC: {cur_anc}', anc_items))
+            items['anc'] = self._submenu(102, f'ANC: {_anc_cur_label(t._anc_mode, t._anc_level)}', anc_items)
 
         # HyperSpeed — plain item; label shows the action clicking will perform
         if t._has_ull:
-            extra.append(self._item(70, f'Turn {"Off" if t._ull_on else "On"} HyperSpeed'))
+            items['ull'] = self._item(70, f'Turn {"Off" if t._ull_on else "On"} HyperSpeed')
 
         # THX Spatial Audio — plain item, same on/off-shows-next-action
         # convention as HyperSpeed above. Unlike the others, the click
@@ -292,49 +298,50 @@ class _MenuService(dbus.service.Object):
         # real state comes back via set_device_state() after the app
         # actually confirms it, rather than being assumed here.
         if t._has_thx:
-            extra.append(self._item(71, f'Turn {"Off" if t._thx_on else "On"} THX Spatial Audio'))
+            items['thx'] = self._item(71, f'Turn {"Off" if t._thx_on else "On"} THX Spatial Audio')
 
-        # Audio function button — only when device supports it
         if t._has_fn:
             fn_items = [self._item(80+i, _sel(name, i == t._fn_mode))
                         for i, name in enumerate(FN_MODES)]
             cur_fn = FN_MODES[t._fn_mode] if 0 <= t._fn_mode < len(FN_MODES) else '?'
-            extra.append(self._submenu(103, f'Fn: {cur_fn}', fn_items))
+            items['fn'] = self._submenu(103, f'Fn: {cur_fn}', fn_items)
 
         # Scroll-wheel submenu — reflects whatever the Fn mode currently
-        # routes the headset's scroll wheel to.
+        # routes the headset's scroll wheel to. Present regardless of
+        # has_fn (devices without a configurable Fn button still have a
+        # scroll wheel bound to game/chat balance).
         if t._has_fn and t._fn_mode == 1:
             sc_items = [self._item(141+i, _sel(str(val), val == t._sidetone))
                         for i, val in enumerate(SIDETONE_LEVELS_VALUES)]
-            extra.append(self._submenu(106, f'Sidetone Scroll: {t._sidetone}', sc_items))
+            items['scroll'] = self._submenu(106, f'Sidetone Scroll: {t._sidetone}', sc_items)
         else:
             gc_items = [self._item(130+i, _sel(_gc_label(val - 10), val == t._gc_balance))
                         for i, val in enumerate(GAME_CHAT_LEVELS)]
-            extra.append(self._submenu(106, f'Game-Chat Scroll: {_gc_label(t._gc_balance - 10)}', gc_items))
+            items['scroll'] = self._submenu(106, f'Game-Chat Scroll: {_gc_label(t._gc_balance - 10)}', gc_items)
 
-        # Wireless power saving — only when device supports it
         if t._has_pwr:
             pwr_items = [self._item(120+i, _sel(label, t._pwr_timeout == val))
                          for i, (val, label) in enumerate(PWR_TIMEOUTS)]
             cur_pwr = next((label for val, label in PWR_TIMEOUTS if val == t._pwr_timeout), '?')
-            extra.append(self._submenu(105, f'Sleep: {cur_pwr}', pwr_items))
+            items['pwr'] = self._submenu(105, f'Sleep: {cur_pwr}', pwr_items)
 
-        if extra:
-            extra = [self._sep(16)] + extra
+        items['resync'] = self._item(17, 'Resync Settings to Headset')
+
+        # t._order is user-controlled (via TrayView's reorder popup);
+        # anything in it that isn't currently applicable (device doesn't
+        # support it) is skipped, and anything applicable but missing from
+        # a stale/older saved order falls back to REORDERABLE_ITEMS' order.
+        order = [sid for sid in t._order if sid in items]
+        order += [sid for sid in REORDERABLE_ITEMS if sid in items and sid not in order]
+        body = [items[sid] for sid in order]
 
         update = []
         if t._update_version:
             update = [self._item(19, f'Update available: v{t._update_version}'), self._sep(12)]
 
-        children = dbus.Array(update + [
-            self._item(10, 'Show Full Window'),
-            self._sep(11),
-            eq_menu,
-            mic_menu,
-            st_menu,
-        ] + extra + [
-            self._sep(15),
-            self._item(17, 'Resync Settings to Headset'),
+        # About/Quit are deliberately NOT part of the reorderable set —
+        # pinned here, always in this order, always last.
+        children = dbus.Array(update + body + [
             self._sep(18),
             self._item(21, 'About'),
             self._item(20, 'Quit'),
@@ -587,6 +594,7 @@ class BatteryTray:
         self._tray_view_mode = False
         self._update_version = None
         self._update_url     = None
+        self._order          = list(REORDERABLE_ITEMS)
 
     def start(self, show_cb=None, quit_cb=None, mic_cb=None,
               sidetone_cb=None, anc_cb=None, ull_cb=None, activate_cb=None, fn_cb=None,
@@ -658,6 +666,45 @@ class BatteryTray:
         self._update_url     = url
         if changed and self._menu:
             self._menu._bump()
+
+    def set_order(self, order):
+        """Push a new reorderable-item order (see REORDERABLE_ITEMS) from
+        TrayView's reorder popup — the right-click menu picks it up on
+        the next open via _MenuService._layout()."""
+        order = list(order)
+        if order != self._order:
+            self._order = order
+            if self._menu:
+                self._menu._bump()
+
+    def item_labels(self):
+        """id -> display label for every reorderable item this device
+        currently supports, in the exact text the dbusmenu itself shows
+        for it. Used by TrayView's reorder popup so both surfaces always
+        agree, instead of duplicating this formatting a second time."""
+        labels = {
+            'show_full_window': 'Show Full Window',
+            'eq':       f'Sound EQ: {EQ_PRESETS[self._eq_preset] if 0 <= self._eq_preset < len(EQ_PRESETS) else "?"}',
+            'mic_eq':   f'Mic EQ: {MIC_PRESETS[self._mic_preset] if 0 <= self._mic_preset < len(MIC_PRESETS) else "?"}',
+            'sidetone': f'Sidetone: {self._sidetone}',
+            'resync':   'Resync Settings to Headset',
+        }
+        if self._has_anc:
+            labels['anc'] = f'ANC: {_anc_cur_label(self._anc_mode, self._anc_level)}'
+        if self._has_ull:
+            labels['ull'] = f'{"Turn Off" if self._ull_on else "Turn On"} HyperSpeed'
+        if self._has_thx:
+            labels['thx'] = f'{"Turn Off" if self._thx_on else "Turn On"} THX Spatial Audio'
+        if self._has_fn:
+            labels['fn'] = f'Fn: {FN_MODES[self._fn_mode] if 0 <= self._fn_mode < len(FN_MODES) else "?"}'
+        if self._has_fn and self._fn_mode == 1:
+            labels['scroll'] = f'Sidetone Scroll: {self._sidetone}'
+        else:
+            labels['scroll'] = f'Game-Chat Scroll: {_gc_label(self._gc_balance - 10)}'
+        if self._has_pwr:
+            cur_pwr = next((label for val, label in PWR_TIMEOUTS if val == self._pwr_timeout), '?')
+            labels['pwr'] = f'Sleep: {cur_pwr}'
+        return labels
 
     def update(self, pct, charging):
         if self._sni:

@@ -26,7 +26,7 @@ def _pump_main_loop():
     while ctx.iteration(False):
         pass
 
-from lynapse._tray import BatteryTray as _BatteryTray
+from lynapse._tray import BatteryTray as _BatteryTray, REORDERABLE_ITEMS
 from lynapse import _update_check
 from lynapse import _thx
 
@@ -171,7 +171,7 @@ def save_profiles(profiles):
     data['profiles'] = profiles
     _write_config(data)
 
-TRAY_SECTIONS = ('mic_eq', 'sidetone', 'thx')  # default/fallback order
+TRAY_SECTIONS = REORDERABLE_ITEMS  # every item the tray's right-click menu can show, reorder-popup default order
 
 def load_tray_order():
     """(order, locked) for the tray quick-popup's reorderable rows. order
@@ -240,6 +240,7 @@ scale.vertical trough { min-width: 4px; min-height: 4px; }
 .tv-move-btn:disabled { color: #333; }
 .tv-lock-btn { background: #2a2a2a; color: #aaa; border: 1px solid #333; border-radius: 4px; padding: 4px 10px; font-size: 11px; }
 .tv-lock-btn.locked { color: #00ff41; border-color: #00ff41; }
+.tv-fixed-label { color: #999; font-size: 12px; padding: 2px 0; }
 """
 
 def sysfs_path():
@@ -342,20 +343,34 @@ def sysfs_write(attr, value):
 
 
 class TrayView(Gtk.Window):
-    """Compact quick-settings popup — shown when tray icon is left-clicked.
-    The Mic EQ / Sidetone / THX rows are drag-reorderable (order + a lock
-    flag persist via load_tray_order()/save_tray_order()); Battery, the
-    lock toggle, and Open Full Window stay fixed in place."""
+    """'Lynapse Reorder Quick Menu' — shown when the tray icon is
+    left-clicked. Lists every item the tray's right-click menu can show
+    (see _tray.REORDERABLE_ITEMS), one plain label per row — this is a
+    reorder tool, not a second set of controls, so rows just show the
+    item's name/current value the same way the real menu does, with no
+    interactive buttons of their own. Dragging (or the ▲/▼ buttons) here
+    changes the order the right-click menu itself uses, live, via
+    self._ctrl._tray.set_order(). About and Quit are deliberately fixed,
+    always last, not part of the reorderable list — see _tray.py's
+    _MenuService._layout()."""
 
     def __init__(self, ctrl):
-        super().__init__(title='Lynapse Quick')
+        super().__init__(title='Lynapse Reorder Quick Menu')
         self._ctrl    = ctrl
         self._busy    = False
         self.set_resizable(False)
         self.set_deletable(True)
+        self.set_icon_name('lynapse')
         self.connect('close-request', lambda w: w.hide() or True)
 
-        self._order, self._locked = load_tray_order()
+        saved_order, self._locked = load_tray_order()
+        # Only show rows for items this device actually supports right
+        # now (item_labels() is already gated on has_anc/has_ull/etc.) —
+        # a saved order may reference ids from a differently-equipped
+        # device or an older version.
+        available = self._ctrl._tray.item_labels()
+        self._order = [sid for sid in saved_order if sid in available]
+        self._order += [sid for sid in REORDERABLE_ITEMS if sid in available and sid not in self._order]
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         outer.set_margin_top(14); outer.set_margin_bottom(14)
@@ -384,7 +399,7 @@ class TrayView(Gtk.Window):
 
         outer.append(Gtk.Separator())
 
-        # Reorderable sections
+        # Reorderable items
         self._list = Gtk.ListBox()
         self._list.set_selection_mode(Gtk.SelectionMode.NONE)
         self._list.add_css_class('tv-list')
@@ -392,6 +407,15 @@ class TrayView(Gtk.Window):
             self._list.append(self._build_row(section_id))
         outer.append(self._list)
         self._sync_reorder_controls()
+
+        # About / Quit — pinned, always last, not reorderable (matches
+        # the right-click menu's own fixed placement for these two).
+        outer.append(Gtk.Separator())
+        for text in ('About', 'Quit'):
+            lbl = Gtk.Label(label=text)
+            lbl.set_halign(Gtk.Align.START)
+            lbl.add_css_class('tv-fixed-label')
+            outer.append(lbl)
 
         outer.append(Gtk.Separator())
 
@@ -441,18 +465,17 @@ class TrayView(Gtk.Window):
         row._handle.set_cursor(Gdk.Cursor.new_from_name('grab'))
         box.append(row._handle)
 
-        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
-        content.set_hexpand(True)
-        {'mic_eq':   self._build_mic_eq_content,
-         'sidetone': self._build_sidetone_content,
-         'thx':      self._build_thx_content}[section_id](content)
-        box.append(content)
+        # Just the item's name/current value, same text the right-click
+        # menu itself shows — this popup is for reordering, not a second
+        # set of controls, so no interactive buttons/sliders here.
+        row._label = Gtk.Label(label=self._ctrl._tray.item_labels().get(section_id, section_id))
+        row._label.set_halign(Gtk.Align.START)
+        row._label.set_hexpand(True)
+        box.append(row._label)
         row.set_child(box)
 
-        # Drag source lives on the handle only, so the preset/step buttons
-        # inside each section stay normally clickable — only grabbing the
-        # handle starts a drag. Gated on self._locked so Lock actually
-        # prevents moves rather than just looking locked.
+        # Drag source lives on the handle only. Gated on self._locked so
+        # Lock actually prevents moves rather than just looking locked.
         drag = Gtk.DragSource()
         drag.set_actions(Gdk.DragAction.MOVE)
         drag.connect('prepare', self._on_drag_prepare, row)
@@ -513,6 +536,9 @@ class TrayView(Gtk.Window):
         _pump_main_loop()
         self._order = [r._section_id for r in self._iter_rows()]
         save_tray_order(self._order, self._locked)
+        # Live-update the actual right-click menu too, not just what's
+        # persisted to disk — see _tray.BatteryTray.set_order().
+        self._ctrl._tray.set_order(self._order)
         self._sync_reorder_controls()
 
     def _iter_rows(self):
@@ -548,69 +574,11 @@ class TrayView(Gtk.Window):
         else:
             self._lock_btn.remove_css_class('locked')
 
-    # ── section content builders ─────────────────────────────────────────
-
-    def _build_mic_eq_content(self, box):
-        lbl = Gtk.Label(label='Mic EQ')
-        lbl.set_halign(Gtk.Align.START)
-        lbl.add_css_class('section-label')
-        box.append(lbl)
-
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        self._meq_btns = {}
-        for i, name in enumerate(MIC_EQ_PRESETS):
-            btn = Gtk.Button(label=name)
-            btn.add_css_class('tv-btn')
-            btn.connect('clicked', self._on_meq, i)
-            row.append(btn)
-            self._meq_btns[i] = btn
-        box.append(row)
-
-    def _build_sidetone_content(self, box):
-        lbl = Gtk.Label(label='Sidetone')
-        lbl.set_halign(Gtk.Align.START)
-        lbl.add_css_class('section-label')
-        box.append(lbl)
-
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        row.set_halign(Gtk.Align.CENTER)
-        st_minus = Gtk.Button(label='−')
-        st_minus.add_css_class('tv-step')
-        st_minus.connect('clicked', self._on_st, -1)
-        self._st_val = Gtk.Label(label='0')
-        self._st_val.set_width_chars(3)
-        self._st_val.set_halign(Gtk.Align.CENTER)
-        st_plus = Gtk.Button(label='+')
-        st_plus.add_css_class('tv-step')
-        st_plus.connect('clicked', self._on_st, +1)
-        row.append(st_minus); row.append(self._st_val); row.append(st_plus)
-        box.append(row)
-
-    def _build_thx_content(self, box):
-        lbl = Gtk.Label(label='THX Spatial Audio')
-        lbl.set_halign(Gtk.Align.START)
-        lbl.add_css_class('section-label')
-        box.append(lbl)
-
-        self._thx_btn = Gtk.Button()
-        self._thx_btn.add_css_class('tv-btn')
-        self._thx_btn.connect('clicked', self._on_thx)
-        box.append(self._thx_btn)
-        self._sync_thx_btn()
-
-    def _sync_thx_btn(self):
-        on = getattr(self._ctrl, '_thx_on', False)
-        self._thx_btn.set_label('Turn Off' if on else 'Turn On')
-
-    def _on_thx(self, _btn):
-        # Same gate as the main window's THX button and the tray's
-        # right-click menu item — see _set_thx() in app.py. Async
-        # (threaded), so the button label updates on the next refresh()
-        # once the real outcome (including the not-set-up case, which
-        # fires a desktop notification) comes back.
-        self._ctrl._tray_set_thx(not getattr(self._ctrl, '_thx_on', False))
-
     def refresh(self):
+        """Battery + every row's label text, from the same item_labels()
+        the right-click menu itself uses — call after anything that might
+        have changed a setting (this popup has no controls of its own to
+        trigger that, but the main window or the right-click menu can)."""
         pct = getattr(self._ctrl, '_last_pct', None)
         ch  = getattr(self._ctrl, '_last_charging', False)
         if pct is not None:
@@ -620,31 +588,9 @@ class TrayView(Gtk.Window):
         else:
             self._bat_lbl.set_markup('<span foreground="#888">—</span>')
 
-        idx = getattr(self._ctrl, '_mic_target_idx', 0)
-        for i, btn in self._meq_btns.items():
-            if i == idx:
-                btn.add_css_class('active')
-            else:
-                btn.remove_css_class('active')
-
-        self._st_val.set_text(str(getattr(self._ctrl, '_sidetone_level', 0)))
-        self._sync_thx_btn()
-
-    def _on_meq(self, btn, idx):
-        ok, _ = self._ctrl._write('mic_eq_preset', str(idx))
-        if ok:
-            self._ctrl._mic_target_idx = idx
-            self._ctrl._update_tray_state()
-            self.refresh()
-
-    def _on_st(self, btn, delta):
-        cur = getattr(self._ctrl, '_sidetone_level', 0)
-        val = max(0, min(15, cur + delta))
-        ok, _ = self._ctrl._write('sidetone', str(val))
-        if ok:
-            self._ctrl._sidetone_level = val
-            self._ctrl._update_tray_state()
-            self._st_val.set_text(str(val))
+        labels = self._ctrl._tray.item_labels()
+        for row in self._iter_rows():
+            row._label.set_text(labels.get(row._section_id, row._section_id))
 
 
 def _install_app_icon():
@@ -1221,6 +1167,7 @@ class LynapseWindow(Gtk.ApplicationWindow):
     def _init_tray(self):
         self._tray      = _BatteryTray()
         self._tray_view = None   # created lazily on first use
+        self._tray.set_order(load_tray_order()[0])
         GLib.idle_add(lambda: self._tray.start(
             show_cb     = self.present,
             quit_cb     = self.get_application().quit,
@@ -1276,7 +1223,7 @@ class LynapseWindow(Gtk.ApplicationWindow):
             self._sidetone_slider.set_value(level)
             self._sidetone_slider.handler_unblock_by_func(self._on_sidetone)
         if self._tray_view is not None:
-            self._tray_view._st_val.set_text(str(level))
+            self._tray_view.refresh()
 
     def _tray_set_game_chat(self, val):
         self._gc_balance = val

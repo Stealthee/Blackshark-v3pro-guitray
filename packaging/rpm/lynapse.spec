@@ -1,5 +1,5 @@
 Name:           lynapse
-Version:        0.1.16
+Version:        0.1.17
 Release:        1%{?dist}
 Summary:        Lynapse — GTK4 control panel for the Razer BlackShark V3 headset
 
@@ -45,6 +45,15 @@ install -Dm644 data/lynapse.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/a
 %{_datadir}/icons/hicolor/scalable/apps/lynapse.svg
 
 %changelog
+* Thu Aug 13 2026 Mehmet Bayoglu - 0.1.17-1
+- Redesign tray quick popup as "Lynapse Reorder Quick Menu": lists all
+  11 right-click menu items (not just 3) as plain read-only labels
+  (matching the real menu's own text) instead of interactive controls
+  -- this popup is purely for reordering the right-click menu, which
+  it now does live via BatteryTray.set_order(). About and Quit are
+  pinned, always last, not reorderable. Uses the Lynapse app icon
+  instead of the generic window icon.
+
 * Thu Aug 13 2026 Mehmet Bayoglu - 0.1.16-1
 - Fix tray icon left-click doing nothing (showed the same right-click
   context menu instead of the quick-settings popup): the SNI

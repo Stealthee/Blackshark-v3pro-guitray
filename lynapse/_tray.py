@@ -447,6 +447,10 @@ class _MenuService(dbus.service.Object):
             GLib.idle_add(_open_url, t._update_url)
         elif id == 22 and t._reorder_cb:
             GLib.idle_add(t._reorder_cb)
+        elif id == 21 and t._about_cb:
+            # Same Gtk.AboutDialog the main window's About button shows,
+            # not just a browser tab — see app.py's _on_about_clicked().
+            GLib.idle_add(t._about_cb)
         elif id == 21:
             GLib.idle_add(_open_url, RELEASES_URL)
 
@@ -603,6 +607,7 @@ class BatteryTray:
         self._thx_on         = False
         self._has_thx        = False
         self._reorder_cb     = None
+        self._about_cb       = None
         self._tray_view_mode = False
         self._update_version = None
         self._update_url     = None
@@ -611,7 +616,7 @@ class BatteryTray:
     def start(self, show_cb=None, quit_cb=None, mic_cb=None,
               sidetone_cb=None, anc_cb=None, ull_cb=None, activate_cb=None, fn_cb=None,
               eq_cb=None, pwr_cb=None, gc_cb=None, resync_cb=None, thx_cb=None,
-              reorder_cb=None):
+              reorder_cb=None, about_cb=None):
         self._show_cb     = show_cb
         self._quit_cb     = quit_cb
         self._mic_cb      = mic_cb
@@ -626,6 +631,7 @@ class BatteryTray:
         self._resync_cb   = resync_cb
         self._thx_cb      = thx_cb
         self._reorder_cb  = reorder_cb
+        self._about_cb    = about_cb
         if not _DBUS_OK:
             return False
         try:

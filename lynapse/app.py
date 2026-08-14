@@ -696,7 +696,10 @@ class LynapseWindow(Gtk.ApplicationWindow):
         threading.Thread(target=_worker, daemon=True).start()
         return False
 
-    def _on_about_clicked(self, _btn):
+    def _on_about_clicked(self, _btn=None):
+        # _btn=None default: also used as the tray's about_cb (id 21 in
+        # the right-click menu), called with no arguments — see
+        # _init_tray() and _tray.py's Event() handler.
         try:
             ver = _pkg_version('lynapse')
         except PackageNotFoundError:
@@ -1144,6 +1147,7 @@ class LynapseWindow(Gtk.ApplicationWindow):
             resync_cb   = self._on_resync_clicked,
             thx_cb      = self._tray_set_thx,
             reorder_cb  = self._on_reorder_clicked,
+            about_cb    = self._on_about_clicked,
         ) or (_log('tray started') or False))
 
     def _on_reorder_clicked(self):

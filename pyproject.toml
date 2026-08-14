@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "lynapse"
-version = "0.1.21"
+version = "0.1.22"
 description = "GTK4 control panel for the Razer BlackShark V3 (openrazer razerkraken driver)"
 readme = "README.md"
 license = {text = "GPL-2.0-or-later"}

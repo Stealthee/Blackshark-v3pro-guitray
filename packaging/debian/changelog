@@ -1,3 +1,11 @@
+lynapse (0.1.22-1) unstable; urgency=medium
+
+  * Tray's right-click "About" now opens the same Gtk.AboutDialog the
+    main window's About button shows, instead of just opening GitHub
+    in a browser.
+
+ -- Mehmet Bayoglu <noreply@example.com>  Thu, 13 Aug 2026 23:45:00 -0500
+
 lynapse (0.1.21-1) unstable; urgency=medium
 
   * About dialog: credit Mehm as original V3 GUI creator, clarify

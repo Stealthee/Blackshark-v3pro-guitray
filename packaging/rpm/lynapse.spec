@@ -1,5 +1,5 @@
 Name:           lynapse
-Version:        0.1.20
+Version:        0.1.21
 Release:        1%{?dist}
 Summary:        Lynapse — GTK4 control panel for the Razer BlackShark V3 headset
 
@@ -45,6 +45,11 @@ install -Dm644 data/lynapse.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/a
 %{_datadir}/icons/hicolor/scalable/apps/lynapse.svg
 
 %changelog
+* Thu Aug 13 2026 Mehmet Bayoglu - 0.1.21-1
+- About dialog: credit Mehm as original V3 GUI creator, clarify this
+  fork is V3 Pro-specific (not guaranteed to work on a plain V3), and
+  reword the donation line as a thank-you for the V3 Pro GUI
+
 * Thu Aug 13 2026 Mehmet Bayoglu - 0.1.20-1
 - Add a personal note + Cash App link to the About dialog
 

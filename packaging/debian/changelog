@@ -1,3 +1,12 @@
+lynapse (0.1.21-1) unstable; urgency=medium
+
+  * About dialog: credit Mehm as original V3 GUI creator, clarify
+    this fork is V3 Pro-specific (not guaranteed to work on a plain
+    V3), and reword the donation line as a thank-you for the V3 Pro
+    GUI.
+
+ -- Mehmet Bayoglu <noreply@example.com>  Thu, 13 Aug 2026 23:30:00 -0500
+
 lynapse (0.1.20-1) unstable; urgency=medium
 
   * Add a personal note + Cash App link to the About dialog.

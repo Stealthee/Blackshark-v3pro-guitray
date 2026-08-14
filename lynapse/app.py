@@ -237,7 +237,6 @@ scale.vertical trough { min-width: 4px; min-height: 4px; }
 .tv-move-btn:disabled { color: #333; }
 .tv-lock-btn { background: #2a2a2a; color: #aaa; border: 1px solid #333; border-radius: 4px; padding: 4px 10px; font-size: 11px; }
 .tv-lock-btn.locked { color: #00ff41; border-color: #00ff41; }
-.tv-fixed-label { color: #999; font-size: 12px; padding: 2px 0; }
 """
 
 def sysfs_path():
@@ -340,17 +339,18 @@ def sysfs_write(attr, value):
 
 
 class TrayView(Gtk.Window):
-    """'Lynapse Reorder Quick Menu' — shown when the tray icon is
-    left-clicked. Lists every reorderable item the tray's right-click
-    menu can show (see _tray.REORDERABLE_ITEMS), one plain label per
-    row — this is a reorder tool, not a second set of controls, so rows
-    just show the item's name/current value the same way the real menu
-    does, with no interactive buttons of their own. The ▲/▼ buttons here
-    change the order the right-click menu itself uses, live, via
-    self._ctrl._tray.set_order(). Show Full Window, About, and Quit are
-    all deliberately fixed and not part of the reorderable list — see
-    _tray.py's _MenuService._layout() (Show Full Window pinned first,
-    About/Quit pinned last)."""
+    """'Lynapse Reorder Quick Menu' — shown via the tray's right-click
+    'Reorder Menu Items…' item (left-click on the tray icon just opens
+    the full window, same as before this popup existed). Lists every
+    reorderable item the tray's right-click menu can show (see
+    _tray.REORDERABLE_ITEMS), one plain label per row — this is a
+    reorder tool, not a second set of controls, so rows just show the
+    item's name/current value the same way the real menu does, with no
+    interactive buttons of their own. The ▲/▼ buttons here change the
+    order the right-click menu itself uses, live, via
+    self._ctrl._tray.set_order(). Show Full Window, Reorder, About, and
+    Quit are all fixed and not part of the reorderable list, nor shown
+    in this popup at all — see _tray.py's _MenuService._layout()."""
 
     def __init__(self, ctrl):
         super().__init__(title='Lynapse Reorder Quick Menu')
@@ -405,17 +405,6 @@ class TrayView(Gtk.Window):
             self._list.append(self._build_row(section_id))
         outer.append(self._list)
         self._sync_reorder_controls()
-
-        # About / Quit — pinned, always last, not reorderable (matches
-        # the right-click menu's own fixed placement for these two; Show
-        # Full Window is pinned there too, first, but isn't shown here at
-        # all since this popup no longer opens it — see Save & Close).
-        outer.append(Gtk.Separator())
-        for text in ('About', 'Quit'):
-            lbl = Gtk.Label(label=text)
-            lbl.set_halign(Gtk.Align.START)
-            lbl.add_css_class('tv-fixed-label')
-            outer.append(lbl)
 
         outer.append(Gtk.Separator())
 
@@ -1136,20 +1125,23 @@ class LynapseWindow(Gtk.ApplicationWindow):
             sidetone_cb = self._tray_set_sidetone,
             anc_cb      = self._tray_set_anc,
             ull_cb      = self._tray_set_ull,
-            activate_cb = self._on_tray_activate,
+            activate_cb = self.present,
             fn_cb       = self._tray_set_fn_mode,
             eq_cb       = self._tray_set_eq_preset,
             pwr_cb      = self._tray_set_pwr_timeout,
             gc_cb       = self._tray_set_game_chat,
             resync_cb   = self._on_resync_clicked,
             thx_cb      = self._tray_set_thx,
+            reorder_cb  = self._on_reorder_clicked,
         ) or (_log('tray started') or False))
 
-    def _on_tray_activate(self):
-        """Left-click on the tray icon: toggle the compact quick-settings
-        popup (TrayView), created lazily on first use. The right-click
-        menu's 'Show Full Window' item still opens the full window via
-        show_cb — this is a separate, deliberately lighter-weight action."""
+    def _on_reorder_clicked(self):
+        """'Reorder Menu Items…' in the right-click menu: toggle the
+        compact reorder popup (TrayView), created lazily on first use.
+        Left-click on the tray icon goes back to opening the full window
+        (activate_cb = self.present, same as before this popup existed)
+        — reordering lives only behind this explicit menu item now, since
+        having it on left-click read as confusing/unexpected."""
         if self._tray_view is None:
             self._tray_view = TrayView(self)
         self._tray_view.refresh()

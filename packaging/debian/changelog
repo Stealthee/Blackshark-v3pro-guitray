@@ -1,3 +1,13 @@
+lynapse (0.1.19-1) unstable; urgency=medium
+
+  * Remove About/Quit from the tray reorder popup entirely. Left-click
+    on the tray icon goes back to opening the full window; the
+    reorder popup is now reached via a new "Reorder Menu Items..."
+    item, pinned 2nd from top in the right-click menu (right after
+    Show Full Window), not itself reorderable.
+
+ -- Mehmet Bayoglu <noreply@example.com>  Thu, 13 Aug 2026 22:30:00 -0500
+
 lynapse (0.1.18-1) unstable; urgency=medium
 
   * Remove drag-and-drop from the tray reorder popup (Gtk/Wayland DnD

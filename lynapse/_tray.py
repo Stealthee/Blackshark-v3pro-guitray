@@ -342,11 +342,13 @@ class _MenuService(dbus.service.Object):
         if t._update_version:
             update = [self._item(19, f'Update available: v{t._update_version}'), self._sep(12)]
 
-        # Show Full Window / About / Quit are deliberately NOT part of the
-        # reorderable set — pinned here, always in this order: Show Full
-        # Window first, About/Quit last.
+        # Show Full Window / Reorder / About / Quit are deliberately NOT
+        # part of the reorderable set — pinned here, always in this
+        # order: Show Full Window then Reorder at the top, About/Quit
+        # at the bottom.
         children = dbus.Array(update + [
             self._item(10, 'Show Full Window'),
+            self._item(22, 'Reorder Menu Items…'),
             self._sep(11),
         ] + body + [
             self._sep(18),
@@ -443,6 +445,8 @@ class _MenuService(dbus.service.Object):
             GLib.idle_add(t._resync_cb)
         elif id == 19 and t._update_url:
             GLib.idle_add(_open_url, t._update_url)
+        elif id == 22 and t._reorder_cb:
+            GLib.idle_add(t._reorder_cb)
         elif id == 21:
             GLib.idle_add(_open_url, RELEASES_URL)
 
@@ -598,6 +602,7 @@ class BatteryTray:
         self._thx_cb         = None
         self._thx_on         = False
         self._has_thx        = False
+        self._reorder_cb     = None
         self._tray_view_mode = False
         self._update_version = None
         self._update_url     = None
@@ -605,7 +610,8 @@ class BatteryTray:
 
     def start(self, show_cb=None, quit_cb=None, mic_cb=None,
               sidetone_cb=None, anc_cb=None, ull_cb=None, activate_cb=None, fn_cb=None,
-              eq_cb=None, pwr_cb=None, gc_cb=None, resync_cb=None, thx_cb=None):
+              eq_cb=None, pwr_cb=None, gc_cb=None, resync_cb=None, thx_cb=None,
+              reorder_cb=None):
         self._show_cb     = show_cb
         self._quit_cb     = quit_cb
         self._mic_cb      = mic_cb
@@ -619,6 +625,7 @@ class BatteryTray:
         self._gc_cb       = gc_cb
         self._resync_cb   = resync_cb
         self._thx_cb      = thx_cb
+        self._reorder_cb  = reorder_cb
         if not _DBUS_OK:
             return False
         try:

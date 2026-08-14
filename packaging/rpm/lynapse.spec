@@ -1,5 +1,5 @@
 Name:           lynapse
-Version:        0.1.14
+Version:        0.1.15
 Release:        1%{?dist}
 Summary:        Lynapse — GTK4 control panel for the Razer BlackShark V3 headset
 
@@ -45,6 +45,15 @@ install -Dm644 data/lynapse.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/a
 %{_datadir}/icons/hicolor/scalable/apps/lynapse.svg
 
 %changelog
+* Thu Aug 13 2026 Mehmet Bayoglu - 0.1.15-1
+- Fix tray quick-popup reordering: the drag handle was a tiny, easy-
+  to-miss glyph with no real hitbox, so clicks meant for it landed on
+  the section's own buttons instead; added big ▲/▼ move buttons as a
+  guaranteed-to-work alternative to dragging. Also fixed a real bug in
+  Gtk.ListBox row moves -- remove()/insert() called back-to-back
+  operated on stale row-index state without a main-loop turn in
+  between, silently no-opping the reorder.
+
 * Thu Aug 13 2026 Mehmet Bayoglu - 0.1.14-1
 - Add THX Spatial Audio toggle to the tray right-click menu and the
   quick-settings popup, same setup gate as the main window (fires a

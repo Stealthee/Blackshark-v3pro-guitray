@@ -16,6 +16,16 @@ def _log(msg):
     except Exception:
         pass
 
+def _pump_main_loop():
+    """Drain pending GLib main-context work synchronously. Gtk.ListBox
+    doesn't update its row-index bookkeeping inside remove()/insert()
+    themselves — it needs a main-loop turn — so code that does a
+    remove() immediately followed by an insert() (see TrayView._move_row)
+    needs this in between, or the insert operates on stale indices."""
+    ctx = GLib.MainContext.default()
+    while ctx.iteration(False):
+        pass
+
 from lynapse._tray import BatteryTray as _BatteryTray
 from lynapse import _update_check
 from lynapse import _thx
@@ -222,8 +232,12 @@ scale.vertical trough { min-width: 4px; min-height: 4px; }
 .tv-step { background: #2a2a2a; color: #eee; border: 1px solid #444; border-radius: 4px; padding: 4px 14px; font-size: 14px; }
 .tv-list { background: transparent; }
 .tv-row { background: transparent; padding: 4px 0; }
-.tv-row:hover { background: alpha(#00ff41, 0.06); border-radius: 4px; }
-.tv-drag-handle { color: #666; font-size: 15px; padding: 0 6px 0 0; }
+.tv-drag-handle { color: #777; font-size: 20px; padding: 0 14px; border-radius: 4px; }
+.tv-drag-handle:hover { background: alpha(#00ff41, 0.15); color: #00ff41; }
+.tv-drag-handle:disabled { color: #444; }
+.tv-move-btn { background: transparent; color: #888; border: none; padding: 0 6px; font-size: 9px; min-width: 0; min-height: 0; }
+.tv-move-btn:hover { color: #00ff41; }
+.tv-move-btn:disabled { color: #333; }
 .tv-lock-btn { background: #2a2a2a; color: #aaa; border: 1px solid #333; border-radius: 4px; padding: 4px 10px; font-size: 11px; }
 .tv-lock-btn.locked { color: #00ff41; border-color: #00ff41; }
 """
@@ -377,6 +391,7 @@ class TrayView(Gtk.Window):
         for section_id in self._order:
             self._list.append(self._build_row(section_id))
         outer.append(self._list)
+        self._sync_reorder_controls()
 
         outer.append(Gtk.Separator())
 
@@ -392,11 +407,39 @@ class TrayView(Gtk.Window):
         row.add_css_class('tv-row')
         row._section_id = section_id  # tag read back on reorder to persist order
 
-        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        handle = Gtk.Label(label='⠿')
-        handle.add_css_class('tv-drag-handle')
-        handle.set_valign(Gtk.Align.CENTER)
-        box.append(handle)
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+
+        # ▲/▼ move buttons — a plain-click, guaranteed-to-work way to
+        # reorder. Kept alongside the drag handle rather than instead of
+        # it: GTK/Wayland drag-and-drop reliability varies by compositor
+        # (and is awkward to test headlessly), so this is the fallback
+        # that can't fail regardless of that.
+        move_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        move_box.set_valign(Gtk.Align.CENTER)
+        row._up_btn = Gtk.Button(label='▲')
+        row._up_btn.add_css_class('tv-move-btn')
+        row._up_btn.set_tooltip_text('Move up')
+        row._up_btn.connect('clicked', self._on_move_click, row, -1)
+        row._down_btn = Gtk.Button(label='▼')
+        row._down_btn.add_css_class('tv-move-btn')
+        row._down_btn.set_tooltip_text('Move down')
+        row._down_btn.connect('clicked', self._on_move_click, row, +1)
+        move_box.append(row._up_btn)
+        move_box.append(row._down_btn)
+        box.append(move_box)
+
+        # Big, full-height, clearly-hoverable drag target — an earlier
+        # version used only a single small glyph with no dedicated
+        # hitbox, which was too easy to miss entirely: clicks meant for
+        # it landed on the section's own buttons instead (which just
+        # activate them normally) rather than ever starting a drag.
+        row._handle = Gtk.Label(label='⠿')
+        row._handle.add_css_class('tv-drag-handle')
+        row._handle.set_valign(Gtk.Align.FILL)
+        row._handle.set_vexpand(True)
+        row._handle.set_tooltip_text('Drag to reorder')
+        row._handle.set_cursor(Gdk.Cursor.new_from_name('grab'))
+        box.append(row._handle)
 
         content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         content.set_hexpand(True)
@@ -413,7 +456,7 @@ class TrayView(Gtk.Window):
         drag = Gtk.DragSource()
         drag.set_actions(Gdk.DragAction.MOVE)
         drag.connect('prepare', self._on_drag_prepare, row)
-        handle.add_controller(drag)
+        row._handle.add_controller(drag)
 
         drop = Gtk.DropTarget.new(GObject.TYPE_INT, Gdk.DragAction.MOVE)
         drop.connect('drop', self._on_drop, row)
@@ -431,17 +474,46 @@ class TrayView(Gtk.Window):
         if self._locked:
             return False
         src_idx = int(value)
-        dst_idx = row.get_index()
+        dst_idx = row.get_index()   # target row's index *before* removal
         if src_idx == dst_idx:
             return False
+        # "Drop onto row X" means "end up immediately before X" — once the
+        # dragged row is removed, everything after it shifts down by one,
+        # so a target that was after the source needs that same -1.
+        final_idx = dst_idx - 1 if src_idx < dst_idx else dst_idx
+        self._move_row(src_idx, final_idx)
+        return True
+
+    def _on_move_click(self, _btn, row, delta):
+        if self._locked:
+            return
+        idx = row.get_index()
+        # Unlike _on_drop's target-row index, this is already the desired
+        # *final* index (one adjacent step), so _move_row needs no shift
+        # adjustment for it — see _move_row's docstring.
+        final_idx = idx + delta
+        if 0 <= final_idx < self._list.observe_children().get_n_items():
+            self._move_row(idx, final_idx)
+
+    def _move_row(self, src_idx, final_idx):
+        """Move the row at src_idx so it ends up at final_idx, where
+        final_idx is already expressed as the row's index *after*
+        removal (i.e. pass the exact target position, not a pre-removal
+        index — callers with a pre-removal reference index need to
+        adjust before calling, as _on_drop does)."""
         src_row = self._list.get_row_at_index(src_idx)
         self._list.remove(src_row)
-        if src_idx < dst_idx:
-            dst_idx -= 1   # removal shifted everything after it down by one
-        self._list.insert(src_row, dst_idx)
+        # Gtk.ListBox's row-index bookkeeping doesn't update synchronously
+        # inside remove()/insert() — an insert() called immediately after
+        # remove() with no main-loop turn in between can operate on a
+        # stale pre-removal index list. Pump the loop so insert() (and
+        # the _iter_rows() read below) sees fully-settled state.
+        _pump_main_loop()
+        self._list.insert(src_row, final_idx)
+        _pump_main_loop()
         self._order = [r._section_id for r in self._iter_rows()]
         save_tray_order(self._order, self._locked)
-        return True
+        self._sync_reorder_controls()
 
     def _iter_rows(self):
         i = 0
@@ -452,10 +524,22 @@ class TrayView(Gtk.Window):
             yield row
             i += 1
 
+    def _sync_reorder_controls(self):
+        """Disable move-up on the first row / move-down on the last, and
+        dim the drag handles, whenever locked. Call after any reorder and
+        after a lock toggle."""
+        rows = list(self._iter_rows())
+        last = len(rows) - 1
+        for i, r in enumerate(rows):
+            r._up_btn.set_sensitive(not self._locked and i > 0)
+            r._down_btn.set_sensitive(not self._locked and i < last)
+            r._handle.set_sensitive(not self._locked)
+
     def _on_lock_toggle(self, _btn):
         self._locked = not self._locked
         save_tray_order(self._order, self._locked)
         self._sync_lock_btn()
+        self._sync_reorder_controls()
 
     def _sync_lock_btn(self):
         self._lock_btn.set_label('🔒 Locked' if self._locked else '🔓 Unlocked — drag ⠿ to reorder')

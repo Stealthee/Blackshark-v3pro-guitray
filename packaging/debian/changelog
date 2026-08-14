@@ -1,3 +1,15 @@
+lynapse (0.1.15-1) unstable; urgency=medium
+
+  * Fix tray quick-popup reordering: the drag handle was a tiny, easy-
+    to-miss glyph with no real hitbox, so clicks meant for it landed
+    on the section's own buttons instead; added big up/down move
+    buttons as a guaranteed-to-work alternative to dragging. Also
+    fixed a real bug in Gtk.ListBox row moves -- remove()/insert()
+    called back-to-back operated on stale row-index state without a
+    main-loop turn in between, silently no-opping the reorder.
+
+ -- Mehmet Bayoglu <noreply@example.com>  Thu, 13 Aug 2026 20:30:00 -0500
+
 lynapse (0.1.14-1) unstable; urgency=medium
 
   * Add THX Spatial Audio toggle to the tray right-click menu and the

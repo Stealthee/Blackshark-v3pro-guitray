@@ -1,5 +1,5 @@
 Name:           lynapse
-Version:        0.1.15
+Version:        0.1.16
 Release:        1%{?dist}
 Summary:        Lynapse — GTK4 control panel for the Razer BlackShark V3 headset
 
@@ -45,6 +45,14 @@ install -Dm644 data/lynapse.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/a
 %{_datadir}/icons/hicolor/scalable/apps/lynapse.svg
 
 %changelog
+* Thu Aug 13 2026 Mehmet Bayoglu - 0.1.16-1
+- Fix tray icon left-click doing nothing (showed the same right-click
+  context menu instead of the quick-settings popup): the SNI
+  ItemIsMenu property was advertised as true, which tells Plasma's
+  systray to never call Activate() at all and always show the menu
+  for every click. Set to false so left-click reaches the popup while
+  right-click still opens the context menu as before.
+
 * Thu Aug 13 2026 Mehmet Bayoglu - 0.1.15-1
 - Fix tray quick-popup reordering: the drag handle was a tiny, easy-
   to-miss glyph with no real hitbox, so clicks meant for it landed on

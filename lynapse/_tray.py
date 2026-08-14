@@ -504,7 +504,17 @@ class _SNIService(dbus.service.Object):
             'AttentionIconPixmap': dbus.Array([], signature='(iiay)'),
             'ToolTip': dbus.Struct(
                 ('', dbus.Array([], signature='(iiay)'), tip, ''), signature=None),
-            'ItemIsMenu': dbus.Boolean(True),
+            # False (not True) so the host treats Activate() (left-click)
+            # as a distinct primary action instead of just always showing
+            # the context menu for every click. ItemIsMenu=True tells SNI
+            # hosts "this icon has no separate primary action" — Plasma's
+            # systray takes that literally and never calls Activate() at
+            # all in that case, which is why left-click and right-click
+            # both opened the same context menu before this. Right-click
+            # still opens the Menu below regardless of this flag — that's
+            # a separate, always-available secondary action per the SNI
+            # spec, not gated on ItemIsMenu.
+            'ItemIsMenu': dbus.Boolean(False),
             'Menu':       dbus.ObjectPath('/StatusNotifierMenu'),
         }
 

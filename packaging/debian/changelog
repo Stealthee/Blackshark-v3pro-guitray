@@ -1,3 +1,14 @@
+lynapse (0.1.16-1) unstable; urgency=medium
+
+  * Fix tray icon left-click doing nothing (showed the same
+    right-click context menu instead of the quick-settings popup):
+    the SNI ItemIsMenu property was advertised as true, which tells
+    Plasma's systray to never call Activate() at all and always show
+    the menu for every click. Set to false so left-click reaches the
+    popup while right-click still opens the context menu as before.
+
+ -- Mehmet Bayoglu <noreply@example.com>  Thu, 13 Aug 2026 21:00:00 -0500
+
 lynapse (0.1.15-1) unstable; urgency=medium
 
   * Fix tray quick-popup reordering: the drag handle was a tiny, easy-

@@ -707,7 +707,13 @@ class LynapseWindow(Gtk.ApplicationWindow):
         about.set_program_name('Lynapse')
         about.set_version(ver)
         about.set_logo_icon_name('lynapse')
-        about.set_comments('GTK4 control panel for the Razer BlackShark V3 / V3 Pro headsets.')
+        about.set_comments(
+            'GTK4 control panel for the Razer BlackShark V3 / V3 Pro headsets.\n\n'
+            'V3 Pro support nearly drove me insane :) — but I did all this because '
+            'I love to tinker.\n\n'
+            'If you’d like to support the project: Cash App $j71rivera. '
+            'If not, that’s okay too!\n\n'
+            'The tray icon will let you know up top when a new version is available.')
         about.set_license_type(Gtk.License.GPL_2_0)
         about.set_website(_update_check.RELEASES_URL)
         about.set_website_label('GitHub')

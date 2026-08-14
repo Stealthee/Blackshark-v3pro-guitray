@@ -1,5 +1,5 @@
 Name:           lynapse
-Version:        0.1.19
+Version:        0.1.20
 Release:        1%{?dist}
 Summary:        Lynapse — GTK4 control panel for the Razer BlackShark V3 headset
 
@@ -45,6 +45,9 @@ install -Dm644 data/lynapse.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/a
 %{_datadir}/icons/hicolor/scalable/apps/lynapse.svg
 
 %changelog
+* Thu Aug 13 2026 Mehmet Bayoglu - 0.1.20-1
+- Add a personal note + Cash App link to the About dialog
+
 * Thu Aug 13 2026 Mehmet Bayoglu - 0.1.19-1
 - Remove About/Quit from the tray reorder popup entirely. Left-click
   on the tray icon goes back to opening the full window; the reorder

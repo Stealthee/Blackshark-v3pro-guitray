@@ -41,9 +41,10 @@ def _gc_label(n):
     return '0'
 
 # Every tray menu item that TrayView's reorder popup can rearrange, in
-# fallback/default order. About and Quit are deliberately excluded — see
-# _MenuService._layout(), which pins them last, always in that order.
-REORDERABLE_ITEMS = ('show_full_window', 'eq', 'mic_eq', 'sidetone', 'anc',
+# fallback/default order. Show Full Window, About, and Quit are all
+# deliberately excluded — see _MenuService._layout(), which pins Show
+# Full Window first and About/Quit last, always in that order.
+REORDERABLE_ITEMS = ('eq', 'mic_eq', 'sidetone', 'anc',
                       'ull', 'thx', 'fn', 'scroll', 'pwr', 'resync')
 
 def _log(msg):
@@ -263,8 +264,10 @@ class _MenuService(dbus.service.Object):
         # popup uses (see REORDERABLE_ITEMS/item_labels below) — order of
         # construction here doesn't matter, only which ones end up in the
         # `items` dict (device-capability-gated) and the order they're
-        # assembled into `children` in, driven by t._order.
-        items = {'show_full_window': self._item(10, 'Show Full Window')}
+        # assembled into `children` in, driven by t._order. Show Full
+        # Window itself is built separately below and pinned first,
+        # always — it's not part of this reorderable dict.
+        items = {}
 
         eq_items = [self._item(110+i, _sel(name, i == t._eq_preset))
                     for i, name in enumerate(EQ_PRESETS)]
@@ -339,9 +342,13 @@ class _MenuService(dbus.service.Object):
         if t._update_version:
             update = [self._item(19, f'Update available: v{t._update_version}'), self._sep(12)]
 
-        # About/Quit are deliberately NOT part of the reorderable set —
-        # pinned here, always in this order, always last.
-        children = dbus.Array(update + body + [
+        # Show Full Window / About / Quit are deliberately NOT part of the
+        # reorderable set — pinned here, always in this order: Show Full
+        # Window first, About/Quit last.
+        children = dbus.Array(update + [
+            self._item(10, 'Show Full Window'),
+            self._sep(11),
+        ] + body + [
             self._sep(18),
             self._item(21, 'About'),
             self._item(20, 'Quit'),
@@ -683,7 +690,6 @@ class BatteryTray:
         for it. Used by TrayView's reorder popup so both surfaces always
         agree, instead of duplicating this formatting a second time."""
         labels = {
-            'show_full_window': 'Show Full Window',
             'eq':       f'Sound EQ: {EQ_PRESETS[self._eq_preset] if 0 <= self._eq_preset < len(EQ_PRESETS) else "?"}',
             'mic_eq':   f'Mic EQ: {MIC_PRESETS[self._mic_preset] if 0 <= self._mic_preset < len(MIC_PRESETS) else "?"}',
             'sidetone': f'Sidetone: {self._sidetone}',

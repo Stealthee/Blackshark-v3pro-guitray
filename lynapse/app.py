@@ -232,9 +232,6 @@ scale.vertical trough { min-width: 4px; min-height: 4px; }
 .tv-step { background: #2a2a2a; color: #eee; border: 1px solid #444; border-radius: 4px; padding: 4px 14px; font-size: 14px; }
 .tv-list { background: transparent; }
 .tv-row { background: transparent; padding: 4px 0; }
-.tv-drag-handle { color: #777; font-size: 20px; padding: 0 14px; border-radius: 4px; }
-.tv-drag-handle:hover { background: alpha(#00ff41, 0.15); color: #00ff41; }
-.tv-drag-handle:disabled { color: #444; }
 .tv-move-btn { background: transparent; color: #888; border: none; padding: 0 6px; font-size: 9px; min-width: 0; min-height: 0; }
 .tv-move-btn:hover { color: #00ff41; }
 .tv-move-btn:disabled { color: #333; }
@@ -344,15 +341,16 @@ def sysfs_write(attr, value):
 
 class TrayView(Gtk.Window):
     """'Lynapse Reorder Quick Menu' — shown when the tray icon is
-    left-clicked. Lists every item the tray's right-click menu can show
-    (see _tray.REORDERABLE_ITEMS), one plain label per row — this is a
-    reorder tool, not a second set of controls, so rows just show the
-    item's name/current value the same way the real menu does, with no
-    interactive buttons of their own. Dragging (or the ▲/▼ buttons) here
-    changes the order the right-click menu itself uses, live, via
-    self._ctrl._tray.set_order(). About and Quit are deliberately fixed,
-    always last, not part of the reorderable list — see _tray.py's
-    _MenuService._layout()."""
+    left-clicked. Lists every reorderable item the tray's right-click
+    menu can show (see _tray.REORDERABLE_ITEMS), one plain label per
+    row — this is a reorder tool, not a second set of controls, so rows
+    just show the item's name/current value the same way the real menu
+    does, with no interactive buttons of their own. The ▲/▼ buttons here
+    change the order the right-click menu itself uses, live, via
+    self._ctrl._tray.set_order(). Show Full Window, About, and Quit are
+    all deliberately fixed and not part of the reorderable list — see
+    _tray.py's _MenuService._layout() (Show Full Window pinned first,
+    About/Quit pinned last)."""
 
     def __init__(self, ctrl):
         super().__init__(title='Lynapse Reorder Quick Menu')
@@ -385,9 +383,9 @@ class TrayView(Gtk.Window):
 
         outer.append(Gtk.Separator())
 
-        # Lock/unlock — a fixed row (not itself draggable) that gates
-        # whether the rows below can be dragged, so an accidental drag
-        # can't reshuffle things once you've got them how you want.
+        # Lock/unlock — a fixed row that gates whether the ▲/▼ buttons
+        # below do anything, so an accidental click can't reshuffle
+        # things once you've got them how you want.
         lock_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         lock_row.set_halign(Gtk.Align.CENTER)
         self._lock_btn = Gtk.Button()
@@ -409,7 +407,9 @@ class TrayView(Gtk.Window):
         self._sync_reorder_controls()
 
         # About / Quit — pinned, always last, not reorderable (matches
-        # the right-click menu's own fixed placement for these two).
+        # the right-click menu's own fixed placement for these two; Show
+        # Full Window is pinned there too, first, but isn't shown here at
+        # all since this popup no longer opens it — see Save & Close).
         outer.append(Gtk.Separator())
         for text in ('About', 'Quit'):
             lbl = Gtk.Label(label=text)
@@ -419,10 +419,18 @@ class TrayView(Gtk.Window):
 
         outer.append(Gtk.Separator())
 
-        # Open full window button
-        full_btn = Gtk.Button(label='Open Full Window')
-        full_btn.connect('clicked', lambda _: (self._ctrl.present(), self.hide()))
-        outer.append(full_btn)
+        save_close_btn = Gtk.Button(label='Save & Close')
+        save_close_btn.connect('clicked', self._on_save_close)
+        outer.append(save_close_btn)
+
+    def _on_save_close(self, _btn):
+        # The order/lock state are already saved incrementally on every
+        # move and every lock toggle — this re-saves (harmless, just a
+        # safety net) and closes, rather than opening the full window
+        # the way the old footer button did.
+        save_tray_order(self._order, self._locked)
+        self._ctrl._tray.set_order(self._order)
+        self.hide()
 
     # ── reorderable rows ─────────────────────────────────────────────────
 
@@ -433,11 +441,10 @@ class TrayView(Gtk.Window):
 
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
 
-        # ▲/▼ move buttons — a plain-click, guaranteed-to-work way to
-        # reorder. Kept alongside the drag handle rather than instead of
-        # it: GTK/Wayland drag-and-drop reliability varies by compositor
-        # (and is awkward to test headlessly), so this is the fallback
-        # that can't fail regardless of that.
+        # ▲/▼ move buttons — the only reorder mechanism now. An earlier
+        # version also had a drag handle, but GTK/Wayland drag-and-drop
+        # here was unreliable enough to crash the app, so it's gone —
+        # these plain-click buttons are simple and can't do that.
         move_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         move_box.set_valign(Gtk.Align.CENTER)
         row._up_btn = Gtk.Button(label='▲')
@@ -452,19 +459,6 @@ class TrayView(Gtk.Window):
         move_box.append(row._down_btn)
         box.append(move_box)
 
-        # Big, full-height, clearly-hoverable drag target — an earlier
-        # version used only a single small glyph with no dedicated
-        # hitbox, which was too easy to miss entirely: clicks meant for
-        # it landed on the section's own buttons instead (which just
-        # activate them normally) rather than ever starting a drag.
-        row._handle = Gtk.Label(label='⠿')
-        row._handle.add_css_class('tv-drag-handle')
-        row._handle.set_valign(Gtk.Align.FILL)
-        row._handle.set_vexpand(True)
-        row._handle.set_tooltip_text('Drag to reorder')
-        row._handle.set_cursor(Gdk.Cursor.new_from_name('grab'))
-        box.append(row._handle)
-
         # Just the item's name/current value, same text the right-click
         # menu itself shows — this popup is for reordering, not a second
         # set of controls, so no interactive buttons/sliders here.
@@ -474,38 +468,7 @@ class TrayView(Gtk.Window):
         box.append(row._label)
         row.set_child(box)
 
-        # Drag source lives on the handle only. Gated on self._locked so
-        # Lock actually prevents moves rather than just looking locked.
-        drag = Gtk.DragSource()
-        drag.set_actions(Gdk.DragAction.MOVE)
-        drag.connect('prepare', self._on_drag_prepare, row)
-        row._handle.add_controller(drag)
-
-        drop = Gtk.DropTarget.new(GObject.TYPE_INT, Gdk.DragAction.MOVE)
-        drop.connect('drop', self._on_drop, row)
-        row.add_controller(drop)
-
         return row
-
-    def _on_drag_prepare(self, source, x, y, row):
-        if self._locked:
-            return None
-        return Gdk.ContentProvider.new_for_value(
-            GObject.Value(GObject.TYPE_INT, row.get_index()))
-
-    def _on_drop(self, target, value, x, y, row):
-        if self._locked:
-            return False
-        src_idx = int(value)
-        dst_idx = row.get_index()   # target row's index *before* removal
-        if src_idx == dst_idx:
-            return False
-        # "Drop onto row X" means "end up immediately before X" — once the
-        # dragged row is removed, everything after it shifts down by one,
-        # so a target that was after the source needs that same -1.
-        final_idx = dst_idx - 1 if src_idx < dst_idx else dst_idx
-        self._move_row(src_idx, final_idx)
-        return True
 
     def _on_move_click(self, _btn, row, delta):
         if self._locked:
@@ -551,15 +514,13 @@ class TrayView(Gtk.Window):
             i += 1
 
     def _sync_reorder_controls(self):
-        """Disable move-up on the first row / move-down on the last, and
-        dim the drag handles, whenever locked. Call after any reorder and
-        after a lock toggle."""
+        """Disable move-up on the first row / move-down on the last,
+        whenever locked. Call after any reorder and after a lock toggle."""
         rows = list(self._iter_rows())
         last = len(rows) - 1
         for i, r in enumerate(rows):
             r._up_btn.set_sensitive(not self._locked and i > 0)
             r._down_btn.set_sensitive(not self._locked and i < last)
-            r._handle.set_sensitive(not self._locked)
 
     def _on_lock_toggle(self, _btn):
         self._locked = not self._locked
@@ -568,7 +529,7 @@ class TrayView(Gtk.Window):
         self._sync_reorder_controls()
 
     def _sync_lock_btn(self):
-        self._lock_btn.set_label('🔒 Locked' if self._locked else '🔓 Unlocked — drag ⠿ to reorder')
+        self._lock_btn.set_label('🔒 Locked' if self._locked else '🔓 Unlocked — ▲▼ to reorder')
         if self._locked:
             self._lock_btn.add_css_class('locked')
         else:

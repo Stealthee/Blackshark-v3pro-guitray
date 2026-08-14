@@ -1,5 +1,5 @@
 Name:           lynapse
-Version:        0.1.17
+Version:        0.1.18
 Release:        1%{?dist}
 Summary:        Lynapse — GTK4 control panel for the Razer BlackShark V3 headset
 
@@ -45,6 +45,14 @@ install -Dm644 data/lynapse.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/a
 %{_datadir}/icons/hicolor/scalable/apps/lynapse.svg
 
 %changelog
+* Thu Aug 13 2026 Mehmet Bayoglu - 0.1.18-1
+- Remove drag-and-drop from the tray reorder popup (Gtk/Wayland DnD
+  was unreliable enough to crash the app); ▲/▼ move buttons remain as
+  the only reorder mechanism. Footer button changed from "Open Full
+  Window" to "Save & Close". "Show Full Window" is no longer in the
+  reorderable list -- pinned first in the right-click menu instead,
+  same as About/Quit are pinned last.
+
 * Thu Aug 13 2026 Mehmet Bayoglu - 0.1.17-1
 - Redesign tray quick popup as "Lynapse Reorder Quick Menu": lists all
   11 right-click menu items (not just 3) as plain read-only labels

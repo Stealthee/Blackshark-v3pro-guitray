@@ -1,3 +1,14 @@
+lynapse (0.1.18-1) unstable; urgency=medium
+
+  * Remove drag-and-drop from the tray reorder popup (Gtk/Wayland DnD
+    was unreliable enough to crash the app); up/down move buttons
+    remain as the only reorder mechanism. Footer button changed from
+    "Open Full Window" to "Save & Close". "Show Full Window" is no
+    longer in the reorderable list -- pinned first in the right-click
+    menu instead, same as About/Quit are pinned last.
+
+ -- Mehmet Bayoglu <noreply@example.com>  Thu, 13 Aug 2026 22:00:00 -0500
+
 lynapse (0.1.17-1) unstable; urgency=medium
 
   * Redesign tray quick popup as "Lynapse Reorder Quick Menu": lists

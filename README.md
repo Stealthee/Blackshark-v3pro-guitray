@@ -167,6 +167,17 @@ sudo udevadm control --reload-rules
 sudo udevadm trigger
 ```
 
+## Optional: THX Spatial Audio
+
+**Entirely optional** — Lynapse and every other feature above work fully without
+this. The **THX SPATIAL AUDIO** toggle on the Sound tab needs a one-time extra
+component to actually do anything (a PipeWire HRTF convolver, since real Windows
+THX is a licensed Windows-only DSP); until it's set up, clicking the toggle just
+tells you it's missing rather than silently doing nothing.
+
+Full setup steps, including exactly which file to download and where to put it,
+are in [THX_SETUP.md](THX_SETUP.md).
+
 ## Releasing (maintainer note)
 
 The tray's "Update available" notice (see [Updating](#updating)) works by comparing

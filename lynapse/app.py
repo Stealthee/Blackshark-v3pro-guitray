@@ -609,6 +609,9 @@ class LynapseWindow(Gtk.ApplicationWindow):
         # disabled state — the toggle was UX bloat that conflated this).
         self._pwr_timeout = _int('power_save', 30)
         self._thx_on = _gv('thx', '0') == '1'
+        # Guards _live_sync's enforce() sweep (below) against racing a
+        # _set_thx() toggle in flight — see that flag's use there.
+        self._thx_toggling = False
         self._ull_on = _gv('ull', '1') == '1'
         anc_raw = _gv('anc', '0 1').split()
         self._anc_mode  = int(anc_raw[0]) if anc_raw and anc_raw[0].isdigit() else 0
@@ -1013,7 +1016,7 @@ class LynapseWindow(Gtk.ApplicationWindow):
             # sink after that (a browser tab resumed later, etc.) would
             # otherwise never get moved onto the effect sink and just
             # sound identical to THX off.
-            if self._thx_on:
+            if self._thx_on and not self._thx_toggling:
                 _thx.enforce()
             GLib.idle_add(self._apply_live_sync, dev, vals)
         threading.Thread(target=_worker, daemon=True).start()
@@ -1608,10 +1611,18 @@ class LynapseWindow(Gtk.ApplicationWindow):
         self._status_label.set_text(
             'Turning THX Spatial Audio on…' if on else 'Turning THX Spatial Audio off…')
 
+        # Block _live_sync's enforce() sweep for the duration of this
+        # toggle — enable()/disable() run their own sink-input sweep over
+        # ~1s, and enforce() racing that on the 700ms live-sync timer was
+        # moving streams back onto the THX sink mid-disable, making "off"
+        # flicker back to sounding on. Cleared in _done() below.
+        self._thx_toggling = True
+
         def _worker():
             ok, err = _thx.enable() if on else _thx.disable()
 
             def _done():
+                self._thx_toggling = False
                 if hasattr(self, '_thx_btn'):
                     self._thx_btn.set_sensitive(True)
                 if ok:

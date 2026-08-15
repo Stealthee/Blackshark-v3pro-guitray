@@ -1,5 +1,5 @@
 Name:           lynapse
-Version:        0.1.22
+Version:        0.1.23
 Release:        1%{?dist}
 Summary:        Lynapse — GTK4 control panel for the Razer BlackShark V3 headset
 
@@ -45,6 +45,17 @@ install -Dm644 data/lynapse.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/a
 %{_datadir}/icons/hicolor/scalable/apps/lynapse.svg
 
 %changelog
+* Fri Aug 14 2026 Mehmet Bayoglu - 0.1.23-1
+- THX Spatial Audio: fixed a silent HRIR channel-index wraparound (the
+  IR file in use had fewer channels than the convolver graph assumed,
+  so both ears were being convolved with the front-left response
+  instead of front-left/front-right)
+- THX Spatial Audio: fixed a race between the toggle-off sweep and the
+  live-sync poll's stray-stream sweep that made turning THX off
+  audibly dip and bounce back up
+- THX Spatial Audio: reduced makeup gain (4.8 -> 3.17, ~+7.6dB net ->
+  ~+4.3dB net) after confirmed clipping on loud broadband content
+
 * Thu Aug 13 2026 Mehmet Bayoglu - 0.1.22-1
 - Tray's right-click "About" now opens the same Gtk.AboutDialog the
   main window's About button shows, instead of just opening GitHub in

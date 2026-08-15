@@ -37,9 +37,20 @@ it's missing instead of silently doing nothing.
 
 ## Setup
 
-1. **Get an IR file.** Any HeSuVi-format WAV works; a Razer-flavored one
-   gets you closest to the Windows THX character. Options:
-   - [IrateGoose's linked collection](https://airtable.com/appayGNkn3nSuXkaz/shruimhjdSakUPg2m/tbloLjoZKWJDnLtTc)
+1. **Get an IR file.** It must be a genuine 14-channel HeSuVi-format WAV —
+   Lynapse convolves specific channel indices (0/1/7/8) out of it, and a
+   file with fewer channels than that silently wraps those indices onto the
+   wrong ones instead of erroring (confirmed against PipeWire's own
+   `plugin_builtin.c`: `ir->channel = ir->channel % info->channels`), which
+   quietly breaks the left/right HRTF differentiation the whole effect
+   depends on. There's no dedicated "THX Spatial Audio" IR out there — it's
+   a licensed, unpublished algorithm — so any well-regarded 14-channel one
+   is a fair substitute; a Razer-branded file gets you a Razer product's
+   character (the *old* Razer Surround app, specifically — not THX), not
+   necessarily anything closer to THX itself. Options:
+   - [IrateGoose's linked collection](https://airtable.com/appayGNkn3nSuXkaz/shruimhjdSakUPg2m/tbloLjoZKWJDnLtTc) —
+     the `atmos` entry (Dolby Atmos for Headphones) is a solid general-purpose
+     starting point
    - HeSuVi's own bundle (`HeSuVi/Common/*.wav` inside a HeSuVi install, if
      you have one from Windows/Wine)
    - An existing IrateGoose setup on this machine, if you have one — its IR
@@ -50,10 +61,11 @@ it's missing instead of silently doing nothing.
 
 2. **Place it here**, exactly:
    ```
-   ~/.local/share/lynapse/thx/razer.wav
+   ~/.local/share/lynapse/thx/atmos.wav
    ```
    Create the directory if it doesn't exist. The filename must be
-   `razer.wav` — that's the only thing Lynapse checks for.
+   `atmos.wav` — that's the only thing Lynapse checks for (despite the
+   name, any 14-channel HeSuVi-format IR goes here, not just Dolby's).
 
 3. That's it. Click **THX SPATIAL AUDIO** in the SOUND tab.
 
@@ -195,7 +207,11 @@ copy from, including the game/chat-sink-scoping and stream-move logic.
 ## Troubleshooting
 
 - **"THX Spatial Audio isn't set up"** — the IR file isn't at
-  `~/.local/share/lynapse/thx/razer.wav`, or it's empty. Re-check step 2.
+  `~/.local/share/lynapse/thx/atmos.wav`, or it's empty. Re-check step 2.
+- **Effect sounds "off" — flat, or lopsided left/right** — check the IR file
+  is actually 14-channel (`ffprobe your.wav`). A file with fewer channels
+  doesn't error, it silently wraps channels 7/8 onto 0/1 (see step 1) and
+  both ears end up convolved with the front-**left** response.
 - **"headset audio sink not found"** — PipeWire doesn't see the headset as
   an active output sink right now. Make sure it's connected and selected as
   an output at least once.

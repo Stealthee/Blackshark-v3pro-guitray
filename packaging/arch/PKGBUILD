@@ -6,10 +6,14 @@ pkgdesc="Lynapse — GTK4 control panel for the Razer BlackShark V3 (openrazer r
 arch=('any')
 url="https://github.com/Stealthee/Blackshark-v3pro-guitray"
 license=('GPL2')
+# NOTE: stock openrazer-driver-dkms (extra/) doesn't support the V3 Pro yet —
+# that needs mehmetbayoglu/openrazer branch blackshark-v3-pro until the
+# upstream PR lands (see README). Depends on the package name, not the fork,
+# since AUR can't express "this branch of this package".
 depends=('python' 'python-gobject' 'gtk4' 'openrazer-driver-dkms')
 makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('c16615a3247757d33c1cb51356e2b03e8cb87df052d74e955f3b1666a5169f84')
 
 build() {
     cd "$pkgname-$pkgver"

@@ -171,6 +171,19 @@ def save_profiles(profiles):
     data['profiles'] = profiles
     _write_config(data)
 
+def load_default_profile():
+    """Name of the profile to auto-apply on every Lynapse startup, or None
+    if no default is set."""
+    return _read_config().get('default_profile')
+
+def save_default_profile(name):
+    data = _read_config()
+    if name:
+        data['default_profile'] = name
+    else:
+        data.pop('default_profile', None)
+    _write_config(data)
+
 TRAY_SECTIONS = REORDERABLE_ITEMS  # every item the tray's right-click menu can show, reorder-popup default order
 
 def load_tray_order():
@@ -579,6 +592,7 @@ class LynapseWindow(Gtk.ApplicationWindow):
         self._eq_custom = load_eq_config()
         self._mic_eq_custom = load_mic_eq_config()
         self._profiles = load_profiles()
+        self._default_profile = load_default_profile()
         self._profile_switching = False
         self._connected_pid = self._device.pid if self._device else None
         self._mic_vol_slider = None
@@ -622,6 +636,32 @@ class LynapseWindow(Gtk.ApplicationWindow):
         self._sidetone_level = _int('sidetone', 0)
         self._mic_target_idx = _int('mic_eq_preset', 0)
         self._fn_mode        = _int('audio_fn_button', 1)
+
+        # A default profile (if set — see the profile switcher below)
+        # overrides every value just seeded above, so Lynapse starts up
+        # already showing/using that profile instead of the raw last-used
+        # cache. _resync_all_settings (scheduled further down) then pushes
+        # these to the device exactly like it already does for the plain
+        # cached case — no separate device-write path needed.
+        if self._default_profile and self._default_profile in self._profiles:
+            prof = self._profiles[self._default_profile]
+            self._eq_target_profile = prof.get('eq_target_profile', self._eq_target_profile)
+            if 'eq_custom' in prof:
+                self._eq_custom = {int(k): v for k, v in prof['eq_custom'].items()}
+            self._mic_target_idx = prof.get('mic_target_idx', self._mic_target_idx)
+            if 'mic_eq_custom' in prof:
+                self._mic_eq_custom = {int(k): v for k, v in prof['mic_eq_custom'].items()}
+            self._anc_mode        = prof.get('anc_mode',        self._anc_mode)
+            self._anc_level       = prof.get('anc_level',       self._anc_level)
+            self._thx_on          = prof.get('thx_on',          self._thx_on)
+            self._ull_on          = prof.get('ull_on',          self._ull_on)
+            self._gc_balance      = prof.get('gc_balance',      self._gc_balance)
+            self._in_call_mix     = prof.get('in_call_mix',     self._in_call_mix)
+            self._audio_prompts   = prof.get('audio_prompts',   self._audio_prompts)
+            self._sidetone_level  = prof.get('sidetone_level',  self._sidetone_level)
+            self._fn_mode         = prof.get('fn_mode',         self._fn_mode)
+            self._pwr_timeout     = prof.get('pwr_timeout',     self._pwr_timeout)
+
         # When True, a widget is being updated programmatically to mirror an
         # on-board (headset button/dial) change — its own change handler must
         # NOT write the value back to the device (that would be a feedback loop).
@@ -831,12 +871,18 @@ class LynapseWindow(Gtk.ApplicationWindow):
 
         self._profile_combo = Gtk.ComboBoxText()
         self._profile_combo.set_size_request(130, -1)
-        self._profile_combo.append('', '— profile —')
-        for name in sorted(self._profiles):
-            self._profile_combo.append(name, name)
-        self._profile_combo.set_active_id('')
+        self._populate_profile_combo()
         self._profile_combo.connect('changed', self._on_profile_selected)
         box.append(self._profile_combo)
+
+        self._default_toggle_switching = False
+        self._default_btn = Gtk.ToggleButton(label='☆')
+        self._default_btn.add_css_class('tv-btn')
+        self._default_btn.set_tooltip_text(
+            'Set the selected profile as default — auto-applied every time Lynapse starts')
+        self._default_btn.connect('toggled', self._on_toggle_default)
+        self._sync_default_btn()
+        box.append(self._default_btn)
 
         save_btn = Gtk.Button(label='Save')
         save_btn.add_css_class('tv-btn')
@@ -851,6 +897,49 @@ class LynapseWindow(Gtk.ApplicationWindow):
         box.append(new_btn)
 
         return box
+
+    def _populate_profile_combo(self, select=None):
+        """(Re)fill the combo's rows, marking the default profile with a
+        star. `select`: which id to leave active afterward — None defaults
+        to the default profile if one's set and still valid (the startup
+        case), else the blank placeholder."""
+        if select is None:
+            select = self._default_profile if self._default_profile in self._profiles else ''
+        self._profile_combo.remove_all()
+        self._profile_combo.append('', '— profile —')
+        for name in sorted(self._profiles):
+            label = f'★ {name}' if name == self._default_profile else name
+            self._profile_combo.append(name, label)
+        self._profile_switching = True
+        self._profile_combo.set_active_id(select)
+        self._profile_switching = False
+
+    def _sync_default_btn(self):
+        """Reflect whether the currently-selected profile is the default in
+        the star toggle's pressed state and glyph, without re-firing its own
+        handler."""
+        name = self._profile_combo.get_active_id()
+        is_default = bool(name) and name == self._default_profile
+        self._default_toggle_switching = True
+        self._default_btn.set_active(is_default)
+        self._default_btn.set_label('★' if is_default else '☆')
+        self._default_btn.set_sensitive(bool(name))
+        self._default_toggle_switching = False
+
+    def _on_toggle_default(self, btn):
+        if self._default_toggle_switching:
+            return
+        name = self._profile_combo.get_active_id()
+        if not name:
+            btn.set_active(False)
+            return
+        self._default_profile = name if btn.get_active() else None
+        save_default_profile(self._default_profile)
+        self._populate_profile_combo(select=name)
+        self._sync_default_btn()
+        self._status_label.set_text(
+            f"'{name}' set as default profile — auto-applied on startup" if btn.get_active()
+            else f"'{name}' is no longer the default profile")
 
     def _snapshot_profile(self):
         """Capture every setting this app manages, for saving under a name."""
@@ -918,6 +1007,7 @@ class LynapseWindow(Gtk.ApplicationWindow):
         if self._profile_switching:
             return
         name = combo.get_active_id()
+        self._sync_default_btn()
         if not name:
             return
         self._apply_profile(name)
@@ -956,14 +1046,10 @@ class LynapseWindow(Gtk.ApplicationWindow):
             name = entry.get_text().strip()
             if not name:
                 return
-            is_new = name not in self._profiles
             self._profiles[name] = self._snapshot_profile()
             save_profiles(self._profiles)
-            if is_new:
-                self._profile_combo.append(name, name)
-            self._profile_switching = True
-            self._profile_combo.set_active_id(name)
-            self._profile_switching = False
+            self._populate_profile_combo(select=name)
+            self._sync_default_btn()
             self._status_label.set_text(f"Saved current settings to new profile '{name}'")
             dialog.destroy()
 

@@ -1,3 +1,21 @@
+lynapse (0.1.24-1) unstable; urgency=medium
+
+  * Named profiles: add a default-profile star toggle next to the profile
+    dropdown. Marking a profile default makes Lynapse start up already
+    showing/using it instead of always coming up on the raw last-used
+    settings with no profile selected.
+
+ -- Mehmet Bayoglu <noreply@example.com>  Sat, 15 Aug 2026 13:30:00 -0500
+
+lynapse (0.1.23-1) unstable; urgency=medium
+
+  * THX Spatial Audio: fixed a silent HRIR channel-index wraparound, a
+    race between the toggle-off sweep and the live-sync poll's stray-
+    stream sweep, and reduced makeup gain after confirmed clipping on
+    loud broadband content.
+
+ -- Mehmet Bayoglu <noreply@example.com>  Fri, 14 Aug 2026 18:00:00 -0500
+
 lynapse (0.1.22-1) unstable; urgency=medium
 
   * Tray's right-click "About" now opens the same Gtk.AboutDialog the

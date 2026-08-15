@@ -1,5 +1,5 @@
 Name:           lynapse
-Version:        0.1.23
+Version:        0.1.24
 Release:        1%{?dist}
 Summary:        Lynapse — GTK4 control panel for the Razer BlackShark V3 headset
 
@@ -45,6 +45,13 @@ install -Dm644 data/lynapse.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/a
 %{_datadir}/icons/hicolor/scalable/apps/lynapse.svg
 
 %changelog
+* Sat Aug 15 2026 Mehmet Bayoglu - 0.1.24-1
+- Named profiles: add a default-profile star toggle next to the profile
+  dropdown. Marking a profile default makes Lynapse start up already
+  showing/using it (EQ, ANC, THX, everything) and pushes it to the
+  device via the existing resync path, instead of always coming up on
+  the raw last-used settings with no profile selected.
+
 * Fri Aug 14 2026 Mehmet Bayoglu - 0.1.23-1
 - THX Spatial Audio: fixed a silent HRIR channel-index wraparound (the
   IR file in use had fewer channels than the convolver graph assumed,

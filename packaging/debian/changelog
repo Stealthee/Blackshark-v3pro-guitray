@@ -1,3 +1,12 @@
+lynapse (0.1.26-1) unstable; urgency=medium
+
+  * Named profiles: drop the blank "-- profile --" dropdown option
+    whenever there's an actual effective default to show instead --
+    redundant clutter otherwise, since there's always a real profile to
+    be "on".
+
+ -- Mehmet Bayoglu <noreply@example.com>  Sat, 15 Aug 2026 14:15:00 -0500
+
 lynapse (0.1.25-1) unstable; urgency=medium
 
   * Default profile: auto-select/apply the sole saved profile as default

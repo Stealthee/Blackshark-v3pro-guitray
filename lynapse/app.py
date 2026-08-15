@@ -916,12 +916,19 @@ class LynapseWindow(Gtk.ApplicationWindow):
         """(Re)fill the combo's rows, marking the effective default profile
         with a star. `select`: which id to leave active afterward — None
         defaults to the effective default if there is one (the startup
-        case), else the blank placeholder."""
+        case), else the blank placeholder.
+
+        The blank '— profile —' placeholder itself only appears when
+        there's currently no designated profile to show instead (zero
+        saved, or multiple saved with none starred as default) — with an
+        effective default, there's always a real profile to be "on", so a
+        blank option would just be redundant clutter."""
         effective_default = self._effective_default_profile()
         if select is None:
             select = effective_default or ''
         self._profile_combo.remove_all()
-        self._profile_combo.append('', '— profile —')
+        if not effective_default:
+            self._profile_combo.append('', '— profile —')
         for name in sorted(self._profiles):
             label = f'★ {name}' if name == effective_default else name
             self._profile_combo.append(name, label)

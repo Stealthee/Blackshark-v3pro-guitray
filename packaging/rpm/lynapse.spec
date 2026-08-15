@@ -1,5 +1,5 @@
 Name:           lynapse
-Version:        0.1.25
+Version:        0.1.26
 Release:        1%{?dist}
 Summary:        Lynapse — GTK4 control panel for the Razer BlackShark V3 headset
 
@@ -45,6 +45,13 @@ install -Dm644 data/lynapse.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/a
 %{_datadir}/icons/hicolor/scalable/apps/lynapse.svg
 
 %changelog
+* Sat Aug 15 2026 Mehmet Bayoglu - 0.1.26-1
+- Named profiles: drop the blank "-- profile --" dropdown option
+  whenever there's an actual effective default to show instead (zero
+  saved profiles, or several with none starred, are the only cases it
+  still appears for) -- redundant clutter otherwise, since there's
+  always a real profile to be "on".
+
 * Sat Aug 15 2026 Mehmet Bayoglu - 0.1.25-1
 - Default profile: only auto-select/apply a profile as default while it's
   your only saved one (nothing to disambiguate yet) -- the star toggle

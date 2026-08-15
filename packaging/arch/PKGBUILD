@@ -1,6 +1,6 @@
 # Maintainer: Mehmet Bayoglu
 pkgname=lynapse
-pkgver=0.1.23
+pkgver=0.1.27
 pkgrel=1
 pkgdesc="Lynapse — GTK4 control panel for the Razer BlackShark V3 (openrazer razerkraken)"
 arch=('any')
@@ -18,7 +18,7 @@ makedepends=('python-build' 'python-pip' 'python-setuptools' 'python-wheel')
 # "cd $pkgname-$pkgver".
 _srcdir="Blackshark-v3pro-guitray-$pkgver"
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('4d626ef1b641732515cd69d451c36a758b65ffc1f00ddf7cef2b43f33182531d')
+sha256sums=('417f7717dc3966c30b09df2ca401180a91a0ad443db940860257f7af191cd4f7')
 
 build() {
     cd "$_srcdir"

@@ -47,10 +47,30 @@ it's missing instead of silently doing nothing.
    a licensed, unpublished algorithm — so any well-regarded 14-channel one
    is a fair substitute; a Razer-branded file gets you a Razer product's
    character (the *old* Razer Surround app, specifically — not THX), not
-   necessarily anything closer to THX itself. Options:
-   - [IrateGoose's linked collection](https://airtable.com/appayGNkn3nSuXkaz/shruimhjdSakUPg2m/tbloLjoZKWJDnLtTc) —
-     the `atmos` entry (Dolby Atmos for Headphones) is a solid general-purpose
-     starting point
+   necessarily anything closer to THX itself.
+
+   **Recommended: Dolby Atmos for Headphones**, from
+   [IrateGoose's HRTF database](https://airtable.com/appayGNkn3nSuXkaz/shruimhjdSakUPg2m/tbloLjoZKWJDnLtTc)
+   (search/filter that table for the `atmos` row — rated 3/4, credited to
+   Dolby Laboratories). Steps:
+   - Open the `atmos` row in the table and grab its **HeSuVi** download
+     link — a Mega folder (currently `mega.nz/folder/eS5yXKLJ#4DGd1mPK1uWrZVh_pCmLAg`,
+     but re-check the row rather than trusting this if it's stale).
+   - The folder has a top-level `atmos.wav` (48kHz) and a `44/atmos.wav`
+     (44.1kHz) — **we hit a corrupted top-level download** (bad CRC on
+     `unzip -t`) with a good 44.1kHz copy sitting right next to it, so if
+     the 48kHz one fails a `unzip -t`/`7z t` integrity check, grab the `44/`
+     one and resample it instead of retrying the download:
+     ```
+     ffmpeg -i atmos/44/atmos.wav -ar 48000 -c:a pcm_f32le ~/.local/share/lynapse/thx/atmos.wav
+     ```
+   - Verify it's really 14-channel before moving on: `ffprobe -v error
+     -show_entries stream=channels -of default=nw=1 ~/.local/share/lynapse/thx/atmos.wav`
+     should print `channels=14`.
+
+   Other options, if you want to compare:
+   - Any other row in that same database, HeSuVi format — the table's
+     `Rating` column (1-4) is a decent starting filter
    - HeSuVi's own bundle (`HeSuVi/Common/*.wav` inside a HeSuVi install, if
      you have one from Windows/Wine)
    - An existing IrateGoose setup on this machine, if you have one — its IR

@@ -882,7 +882,6 @@ class LynapseWindow(Gtk.ApplicationWindow):
         self._default_btn = Gtk.ToggleButton(label='☆')
         self._default_btn.add_css_class('tv-btn')
         self._default_btn.connect('toggled', self._on_toggle_default)
-        self._sync_default_btn()
         box.append(self._default_btn)
 
         save_btn = Gtk.Button(label='Save')
@@ -897,6 +896,13 @@ class LynapseWindow(Gtk.ApplicationWindow):
         new_btn.connect('clicked', self._on_new_profile)
         box.append(new_btn)
 
+        self._delete_btn = Gtk.Button(label='🗑')
+        self._delete_btn.add_css_class('tv-btn')
+        self._delete_btn.set_tooltip_text('Delete the selected profile')
+        self._delete_btn.connect('clicked', self._on_delete_profile)
+        box.append(self._delete_btn)
+
+        self._sync_profile_buttons()
         return box
 
     def _effective_default_profile(self):
@@ -936,12 +942,13 @@ class LynapseWindow(Gtk.ApplicationWindow):
         self._profile_combo.set_active_id(select)
         self._profile_switching = False
 
-    def _sync_default_btn(self):
+    def _sync_profile_buttons(self):
         """Reflect whether the currently-selected profile is the (effective)
-        default in the star toggle's pressed state and glyph, without
-        re-firing its own handler. Disabled while there's only one profile
-        — nothing to choose between yet, it's already the default for
-        free (see _effective_default_profile)."""
+        default in the star toggle's pressed state and glyph (without
+        re-firing its own handler), and the delete button's sensitivity.
+        The star is disabled while there's only one profile — nothing to
+        choose between yet, it's already the default for free (see
+        _effective_default_profile)."""
         name = self._profile_combo.get_active_id()
         solo = len(self._profiles) <= 1
         is_default = bool(name) and name == self._effective_default_profile()
@@ -954,6 +961,7 @@ class LynapseWindow(Gtk.ApplicationWindow):
             if solo else
             'Set the selected profile as default — auto-applied every time Lynapse starts')
         self._default_toggle_switching = False
+        self._delete_btn.set_sensitive(bool(name))
 
     def _on_toggle_default(self, btn):
         if self._default_toggle_switching:
@@ -965,7 +973,7 @@ class LynapseWindow(Gtk.ApplicationWindow):
         self._default_profile = name if btn.get_active() else None
         save_default_profile(self._default_profile)
         self._populate_profile_combo(select=name)
-        self._sync_default_btn()
+        self._sync_profile_buttons()
         self._status_label.set_text(
             f"'{name}' set as default profile — auto-applied on startup" if btn.get_active()
             else f"'{name}' is no longer the default profile")
@@ -1036,7 +1044,7 @@ class LynapseWindow(Gtk.ApplicationWindow):
         if self._profile_switching:
             return
         name = combo.get_active_id()
-        self._sync_default_btn()
+        self._sync_profile_buttons()
         if not name:
             return
         self._apply_profile(name)
@@ -1078,7 +1086,7 @@ class LynapseWindow(Gtk.ApplicationWindow):
             self._profiles[name] = self._snapshot_profile()
             save_profiles(self._profiles)
             self._populate_profile_combo(select=name)
-            self._sync_default_btn()
+            self._sync_profile_buttons()
             self._status_label.set_text(f"Saved current settings to new profile '{name}'")
             dialog.destroy()
 
@@ -1089,6 +1097,47 @@ class LynapseWindow(Gtk.ApplicationWindow):
 
         dialog.present()
         entry.grab_focus()
+
+    def _on_delete_profile(self, btn):
+        name = self._profile_combo.get_active_id()
+        if not name:
+            return
+
+        dialog = Gtk.Window(title=f"Delete '{name}'?", transient_for=self, modal=True)
+        dialog.set_default_size(300, -1)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        box.set_margin_top(16); box.set_margin_bottom(16)
+        box.set_margin_start(16); box.set_margin_end(16)
+        dialog.set_child(box)
+
+        lbl = Gtk.Label(label=f"Delete profile '{name}'? This can't be undone.")
+        lbl.set_halign(Gtk.Align.START)
+        lbl.set_wrap(True)
+        box.append(lbl)
+
+        btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        btn_row.set_halign(Gtk.Align.END)
+        cancel_btn = Gtk.Button(label='Cancel')
+        cancel_btn.connect('clicked', lambda _b: dialog.destroy())
+        delete_btn = Gtk.Button(label='Delete')
+        delete_btn.add_css_class('destructive-action')
+
+        def _do_delete(_w=None):
+            self._profiles.pop(name, None)
+            save_profiles(self._profiles)
+            if self._default_profile == name:
+                self._default_profile = None
+                save_default_profile(None)
+            self._populate_profile_combo()
+            self._sync_profile_buttons()
+            self._status_label.set_text(f"Deleted profile '{name}'")
+            dialog.destroy()
+
+        delete_btn.connect('clicked', _do_delete)
+        btn_row.append(cancel_btn); btn_row.append(delete_btn)
+        box.append(btn_row)
+
+        dialog.present()
 
     # ── live sync (on-board button changes → UI) ─────────────────────────────
     # Only cache-backed attrs are polled here. Reading these returns the value

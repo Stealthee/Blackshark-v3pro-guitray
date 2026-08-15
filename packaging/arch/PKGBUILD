@@ -11,7 +11,7 @@ license=('GPL2')
 # upstream PR lands (see README). Depends on the package name, not the fork,
 # since AUR can't express "this branch of this package".
 depends=('python' 'python-gobject' 'gtk4' 'openrazer-driver-dkms')
-makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel')
+makedepends=('python-build' 'python-pip' 'python-setuptools' 'python-wheel')
 # GitHub names the tarball's top-level directory after the repo, not
 # pkgname — it unpacks to "Blackshark-v3pro-guitray-$pkgver", not
 # "lynapse-$pkgver", hence _srcdir below rather than the more usual
@@ -27,7 +27,21 @@ build() {
 
 package() {
     cd "$_srcdir"
-    python -m installer --destdir="$pkgdir" dist/*.whl
+    # python -m installer resolves each destination path against the real
+    # (non-staged) system site-packages to sanity-check it, which trips a
+    # false positive if that path already exists there as a symlink (e.g.
+    # a prior ./install.sh run's /usr/local compat-symlink scheme — see
+    # README's install notes). pip's --root install doesn't do that check,
+    # and is the same mechanism install.sh itself already uses.
+    # --no-compile: skip .pyc generation here — bytecode caches embed the
+    # absolute $pkgdir build path (fakeroot's staging dir) in co_filename,
+    # which makepkg's packaging-issue check correctly flags as a leaked
+    # build path. Python just compiles on first import instead.
+    pip install --root="$pkgdir" --no-deps --ignore-installed --no-compile --prefix=/usr dist/*.whl
+    # pip's direct_url.json records the absolute $srcdir path it installed
+    # from — same class of build-path leak, and no runtime purpose once
+    # packaged, so drop it.
+    rm -f "$pkgdir"/usr/lib/python*/site-packages/*.dist-info/direct_url.json
     install -Dm644 data/lynapse.desktop "$pkgdir/usr/share/applications/lynapse.desktop"
     install -Dm644 data/lynapse.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/lynapse.svg"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"

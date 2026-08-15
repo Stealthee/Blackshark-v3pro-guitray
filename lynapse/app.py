@@ -171,6 +171,19 @@ def save_profiles(profiles):
     data['profiles'] = profiles
     _write_config(data)
 
+def load_default_profile():
+    """Name of the profile to auto-apply on every Lynapse startup, or None
+    if no default is set."""
+    return _read_config().get('default_profile')
+
+def save_default_profile(name):
+    data = _read_config()
+    if name:
+        data['default_profile'] = name
+    else:
+        data.pop('default_profile', None)
+    _write_config(data)
+
 TRAY_SECTIONS = REORDERABLE_ITEMS  # every item the tray's right-click menu can show, reorder-popup default order
 
 def load_tray_order():
@@ -579,6 +592,7 @@ class LynapseWindow(Gtk.ApplicationWindow):
         self._eq_custom = load_eq_config()
         self._mic_eq_custom = load_mic_eq_config()
         self._profiles = load_profiles()
+        self._default_profile = load_default_profile()
         self._profile_switching = False
         self._connected_pid = self._device.pid if self._device else None
         self._mic_vol_slider = None
@@ -609,6 +623,9 @@ class LynapseWindow(Gtk.ApplicationWindow):
         # disabled state — the toggle was UX bloat that conflated this).
         self._pwr_timeout = _int('power_save', 30)
         self._thx_on = _gv('thx', '0') == '1'
+        # Guards _live_sync's enforce() sweep (below) against racing a
+        # _set_thx() toggle in flight — see that flag's use there.
+        self._thx_toggling = False
         self._ull_on = _gv('ull', '1') == '1'
         anc_raw = _gv('anc', '0 1').split()
         self._anc_mode  = int(anc_raw[0]) if anc_raw and anc_raw[0].isdigit() else 0
@@ -619,6 +636,35 @@ class LynapseWindow(Gtk.ApplicationWindow):
         self._sidetone_level = _int('sidetone', 0)
         self._mic_target_idx = _int('mic_eq_preset', 0)
         self._fn_mode        = _int('audio_fn_button', 1)
+
+        # The effective default profile (explicitly starred, or — with
+        # nothing starred — the sole profile if that's all there is; see
+        # _effective_default_profile) overrides every value just seeded
+        # above, so Lynapse starts up already showing/using it instead of
+        # the raw last-used cache. _resync_all_settings (scheduled further
+        # down) then pushes these to the device exactly like it already
+        # does for the plain cached case — no separate device-write path
+        # needed.
+        effective_default = self._effective_default_profile()
+        if effective_default:
+            prof = self._profiles[effective_default]
+            self._eq_target_profile = prof.get('eq_target_profile', self._eq_target_profile)
+            if 'eq_custom' in prof:
+                self._eq_custom = {int(k): v for k, v in prof['eq_custom'].items()}
+            self._mic_target_idx = prof.get('mic_target_idx', self._mic_target_idx)
+            if 'mic_eq_custom' in prof:
+                self._mic_eq_custom = {int(k): v for k, v in prof['mic_eq_custom'].items()}
+            self._anc_mode        = prof.get('anc_mode',        self._anc_mode)
+            self._anc_level       = prof.get('anc_level',       self._anc_level)
+            self._thx_on          = prof.get('thx_on',          self._thx_on)
+            self._ull_on          = prof.get('ull_on',          self._ull_on)
+            self._gc_balance      = prof.get('gc_balance',      self._gc_balance)
+            self._in_call_mix     = prof.get('in_call_mix',     self._in_call_mix)
+            self._audio_prompts   = prof.get('audio_prompts',   self._audio_prompts)
+            self._sidetone_level  = prof.get('sidetone_level',  self._sidetone_level)
+            self._fn_mode         = prof.get('fn_mode',         self._fn_mode)
+            self._pwr_timeout     = prof.get('pwr_timeout',     self._pwr_timeout)
+
         # When True, a widget is being updated programmatically to mirror an
         # on-board (headset button/dial) change — its own change handler must
         # NOT write the value back to the device (that would be a feedback loop).
@@ -828,12 +874,15 @@ class LynapseWindow(Gtk.ApplicationWindow):
 
         self._profile_combo = Gtk.ComboBoxText()
         self._profile_combo.set_size_request(130, -1)
-        self._profile_combo.append('', '— profile —')
-        for name in sorted(self._profiles):
-            self._profile_combo.append(name, name)
-        self._profile_combo.set_active_id('')
+        self._populate_profile_combo()
         self._profile_combo.connect('changed', self._on_profile_selected)
         box.append(self._profile_combo)
+
+        self._default_toggle_switching = False
+        self._default_btn = Gtk.ToggleButton(label='☆')
+        self._default_btn.add_css_class('tv-btn')
+        self._default_btn.connect('toggled', self._on_toggle_default)
+        box.append(self._default_btn)
 
         save_btn = Gtk.Button(label='Save')
         save_btn.add_css_class('tv-btn')
@@ -847,7 +896,87 @@ class LynapseWindow(Gtk.ApplicationWindow):
         new_btn.connect('clicked', self._on_new_profile)
         box.append(new_btn)
 
+        self._delete_btn = Gtk.Button(label='🗑')
+        self._delete_btn.add_css_class('tv-btn')
+        self._delete_btn.set_tooltip_text('Delete the selected profile')
+        self._delete_btn.connect('clicked', self._on_delete_profile)
+        box.append(self._delete_btn)
+
+        self._sync_profile_buttons()
         return box
+
+    def _effective_default_profile(self):
+        """Which profile counts as default right now: the explicitly
+        starred one (default_profile in lynapse.json) if it's still valid,
+        otherwise — only while there's exactly one profile saved — that
+        lone profile auto-counts, since there's nothing to disambiguate.
+        The moment a second profile exists this stops; from then on
+        default is only ever the explicitly-starred one (or None)."""
+        if self._default_profile in self._profiles:
+            return self._default_profile
+        if len(self._profiles) == 1:
+            return next(iter(self._profiles))
+        return None
+
+    def _populate_profile_combo(self, select=None):
+        """(Re)fill the combo's rows, marking the effective default profile
+        with a star. `select`: which id to leave active afterward — None
+        defaults to the effective default if there is one (the startup
+        case), else the blank placeholder.
+
+        The blank '— profile —' placeholder itself only appears when
+        there's currently no designated profile to show instead (zero
+        saved, or multiple saved with none starred as default) — with an
+        effective default, there's always a real profile to be "on", so a
+        blank option would just be redundant clutter."""
+        effective_default = self._effective_default_profile()
+        if select is None:
+            select = effective_default or ''
+        self._profile_combo.remove_all()
+        if not effective_default:
+            self._profile_combo.append('', '— profile —')
+        for name in sorted(self._profiles):
+            label = f'★ {name}' if name == effective_default else name
+            self._profile_combo.append(name, label)
+        self._profile_switching = True
+        self._profile_combo.set_active_id(select)
+        self._profile_switching = False
+
+    def _sync_profile_buttons(self):
+        """Reflect whether the currently-selected profile is the (effective)
+        default in the star toggle's pressed state and glyph (without
+        re-firing its own handler), and the delete button's sensitivity.
+        The star is disabled while there's only one profile — nothing to
+        choose between yet, it's already the default for free (see
+        _effective_default_profile)."""
+        name = self._profile_combo.get_active_id()
+        solo = len(self._profiles) <= 1
+        is_default = bool(name) and name == self._effective_default_profile()
+        self._default_toggle_switching = True
+        self._default_btn.set_active(is_default)
+        self._default_btn.set_label('★' if is_default else '☆')
+        self._default_btn.set_sensitive(bool(name) and not solo)
+        self._default_btn.set_tooltip_text(
+            "Automatically the default while it's your only profile"
+            if solo else
+            'Set the selected profile as default — auto-applied every time Lynapse starts')
+        self._default_toggle_switching = False
+        self._delete_btn.set_sensitive(bool(name))
+
+    def _on_toggle_default(self, btn):
+        if self._default_toggle_switching:
+            return
+        name = self._profile_combo.get_active_id()
+        if not name:
+            btn.set_active(False)
+            return
+        self._default_profile = name if btn.get_active() else None
+        save_default_profile(self._default_profile)
+        self._populate_profile_combo(select=name)
+        self._sync_profile_buttons()
+        self._status_label.set_text(
+            f"'{name}' set as default profile — auto-applied on startup" if btn.get_active()
+            else f"'{name}' is no longer the default profile")
 
     def _snapshot_profile(self):
         """Capture every setting this app manages, for saving under a name."""
@@ -915,6 +1044,7 @@ class LynapseWindow(Gtk.ApplicationWindow):
         if self._profile_switching:
             return
         name = combo.get_active_id()
+        self._sync_profile_buttons()
         if not name:
             return
         self._apply_profile(name)
@@ -953,14 +1083,10 @@ class LynapseWindow(Gtk.ApplicationWindow):
             name = entry.get_text().strip()
             if not name:
                 return
-            is_new = name not in self._profiles
             self._profiles[name] = self._snapshot_profile()
             save_profiles(self._profiles)
-            if is_new:
-                self._profile_combo.append(name, name)
-            self._profile_switching = True
-            self._profile_combo.set_active_id(name)
-            self._profile_switching = False
+            self._populate_profile_combo(select=name)
+            self._sync_profile_buttons()
             self._status_label.set_text(f"Saved current settings to new profile '{name}'")
             dialog.destroy()
 
@@ -971,6 +1097,47 @@ class LynapseWindow(Gtk.ApplicationWindow):
 
         dialog.present()
         entry.grab_focus()
+
+    def _on_delete_profile(self, btn):
+        name = self._profile_combo.get_active_id()
+        if not name:
+            return
+
+        dialog = Gtk.Window(title=f"Delete '{name}'?", transient_for=self, modal=True)
+        dialog.set_default_size(300, -1)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        box.set_margin_top(16); box.set_margin_bottom(16)
+        box.set_margin_start(16); box.set_margin_end(16)
+        dialog.set_child(box)
+
+        lbl = Gtk.Label(label=f"Delete profile '{name}'? This can't be undone.")
+        lbl.set_halign(Gtk.Align.START)
+        lbl.set_wrap(True)
+        box.append(lbl)
+
+        btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        btn_row.set_halign(Gtk.Align.END)
+        cancel_btn = Gtk.Button(label='Cancel')
+        cancel_btn.connect('clicked', lambda _b: dialog.destroy())
+        delete_btn = Gtk.Button(label='Delete')
+        delete_btn.add_css_class('destructive-action')
+
+        def _do_delete(_w=None):
+            self._profiles.pop(name, None)
+            save_profiles(self._profiles)
+            if self._default_profile == name:
+                self._default_profile = None
+                save_default_profile(None)
+            self._populate_profile_combo()
+            self._sync_profile_buttons()
+            self._status_label.set_text(f"Deleted profile '{name}'")
+            dialog.destroy()
+
+        delete_btn.connect('clicked', _do_delete)
+        btn_row.append(cancel_btn); btn_row.append(delete_btn)
+        box.append(btn_row)
+
+        dialog.present()
 
     # ── live sync (on-board button changes → UI) ─────────────────────────────
     # Only cache-backed attrs are polled here. Reading these returns the value
@@ -1013,7 +1180,7 @@ class LynapseWindow(Gtk.ApplicationWindow):
             # sink after that (a browser tab resumed later, etc.) would
             # otherwise never get moved onto the effect sink and just
             # sound identical to THX off.
-            if self._thx_on:
+            if self._thx_on and not self._thx_toggling:
                 _thx.enforce()
             GLib.idle_add(self._apply_live_sync, dev, vals)
         threading.Thread(target=_worker, daemon=True).start()
@@ -1608,10 +1775,18 @@ class LynapseWindow(Gtk.ApplicationWindow):
         self._status_label.set_text(
             'Turning THX Spatial Audio on…' if on else 'Turning THX Spatial Audio off…')
 
+        # Block _live_sync's enforce() sweep for the duration of this
+        # toggle — enable()/disable() run their own sink-input sweep over
+        # ~1s, and enforce() racing that on the 700ms live-sync timer was
+        # moving streams back onto the THX sink mid-disable, making "off"
+        # flicker back to sounding on. Cleared in _done() below.
+        self._thx_toggling = True
+
         def _worker():
             ok, err = _thx.enable() if on else _thx.disable()
 
             def _done():
+                self._thx_toggling = False
                 if hasattr(self, '_thx_btn'):
                     self._thx_btn.set_sensitive(True)
                 if ok:

@@ -1,3 +1,47 @@
+lynapse (0.1.27-1) unstable; urgency=medium
+
+  * Named profiles: add a delete button (trash icon, next to Save/+),
+    with a "Delete 'name'?" confirmation dialog. Clears the deleted
+    profile as default first if it was starred.
+
+ -- Mehmet Bayoglu <noreply@example.com>  Sat, 15 Aug 2026 14:30:00 -0500
+
+lynapse (0.1.26-1) unstable; urgency=medium
+
+  * Named profiles: drop the blank "-- profile --" dropdown option
+    whenever there's an actual effective default to show instead --
+    redundant clutter otherwise, since there's always a real profile to
+    be "on".
+
+ -- Mehmet Bayoglu <noreply@example.com>  Sat, 15 Aug 2026 14:15:00 -0500
+
+lynapse (0.1.25-1) unstable; urgency=medium
+
+  * Default profile: auto-select/apply the sole saved profile as default
+    with no manual starring needed, but only while it's the only one --
+    the moment a second profile is added, picking a default goes back to
+    manual via the star toggle.
+
+ -- Mehmet Bayoglu <noreply@example.com>  Sat, 15 Aug 2026 14:00:00 -0500
+
+lynapse (0.1.24-1) unstable; urgency=medium
+
+  * Named profiles: add a default-profile star toggle next to the profile
+    dropdown. Marking a profile default makes Lynapse start up already
+    showing/using it instead of always coming up on the raw last-used
+    settings with no profile selected.
+
+ -- Mehmet Bayoglu <noreply@example.com>  Sat, 15 Aug 2026 13:30:00 -0500
+
+lynapse (0.1.23-1) unstable; urgency=medium
+
+  * THX Spatial Audio: fixed a silent HRIR channel-index wraparound, a
+    race between the toggle-off sweep and the live-sync poll's stray-
+    stream sweep, and reduced makeup gain after confirmed clipping on
+    loud broadband content.
+
+ -- Mehmet Bayoglu <noreply@example.com>  Fri, 14 Aug 2026 18:00:00 -0500
+
 lynapse (0.1.22-1) unstable; urgency=medium
 
   * Tray's right-click "About" now opens the same Gtk.AboutDialog the

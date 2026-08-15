@@ -15,7 +15,7 @@ import os
 import subprocess
 import time
 
-IR_FILE   = os.path.expanduser('~/.local/share/lynapse/thx/razer.wav')
+IR_FILE   = os.path.expanduser('~/.local/share/lynapse/thx/atmos.wav')
 CONF_PATH = os.path.expanduser('~/.config/pipewire/pipewire.conf.d/60-lynapse-thx.conf')
 SINK_NAME = 'effect_input.lynapse-thx'
 
@@ -67,24 +67,18 @@ context.modules = [
                     # the naive model, 1.4 then 1.96, and both landed
                     # within ~0.2dB of bypass, i.e. audibly unchanged.)
                     #
-                    # 4.8 targets the midpoint between the previous
-                    # measured +4.3dB and Windows Synapse's own measured
-                    # +10.9dB (docs/synapse_thx_capture.md) — netting
-                    # ~+7.6dB. This EXCEEDS the ~5dB of headroom a
-                    # pink-noise bypass tone has before 0dBFS on this
-                    # graph (confirmed clipping in testing), so expect
-                    # occasional clipping on sustained loud/broadband
-                    # passages until this is dialed back or a proper
-                    # limiter is added — filter-chain's builtin node set
-                    # has no limiter/compressor (only a plain "clamp",
-                    # which just moves where the hard-clip happens rather
-                    # than smoothing it, so wasn't worth adding). Real
-                    # program material's higher crest factor may tolerate
-                    # this better than the pink-noise worst case, but
-                    # listen for harshness on loud content before trusting
-                    # this value.
-                    { type = builtin label = mixer name = mixL control = { "Gain 1" = 4.8 "Gain 2" = 4.8 } }
-                    { type = builtin label = mixer name = mixR control = { "Gain 1" = 4.8 "Gain 2" = 4.8 } }
+                    # 4.8 (~+7.6dB net) pushed past the ~5dB of headroom a
+                    # pink-noise bypass tone has before 0dBFS on this graph,
+                    # and confirmed clipping on real broadband/high-crest
+                    # content (thunderstorm sounds) 2026-08-14 — filter-
+                    # chain's builtin node set has no limiter/compressor
+                    # (only a plain "clamp", which just moves where the
+                    # hard-clip happens rather than smoothing it, so wasn't
+                    # worth adding). Dialed back to 3.17 (~+4.3dB net), the
+                    # earlier value measured to still have ~1dB of headroom
+                    # against that same pink-noise worst case.
+                    { type = builtin label = mixer name = mixL control = { "Gain 1" = 3.17 "Gain 2" = 3.17 } }
+                    { type = builtin label = mixer name = mixR control = { "Gain 1" = 3.17 "Gain 2" = 3.17 } }
 
                     # Mild warming tilt to match the ~2.5-2.9dB high-mid/air
                     # roll-off measured against Synapse's real THX (same

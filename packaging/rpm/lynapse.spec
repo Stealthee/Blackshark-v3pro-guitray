@@ -1,5 +1,5 @@
 Name:           lynapse
-Version:        0.1.22
+Version:        0.1.27
 Release:        1%{?dist}
 Summary:        Lynapse — GTK4 control panel for the Razer BlackShark V3 headset
 
@@ -45,6 +45,46 @@ install -Dm644 data/lynapse.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/a
 %{_datadir}/icons/hicolor/scalable/apps/lynapse.svg
 
 %changelog
+* Sat Aug 15 2026 Mehmet Bayoglu - 0.1.27-1
+- Named profiles: add a delete button (trash icon, next to Save/+),
+  with a confirmation dialog. Clears the deleted profile as default
+  first if it was starred, so nothing stale is left pointing at a
+  profile that no longer exists.
+
+* Sat Aug 15 2026 Mehmet Bayoglu - 0.1.26-1
+- Named profiles: drop the blank "-- profile --" dropdown option
+  whenever there's an actual effective default to show instead (zero
+  saved profiles, or several with none starred, are the only cases it
+  still appears for) -- redundant clutter otherwise, since there's
+  always a real profile to be "on".
+
+* Sat Aug 15 2026 Mehmet Bayoglu - 0.1.25-1
+- Default profile: only auto-select/apply a profile as default while it's
+  your only saved one (nothing to disambiguate yet) -- the star toggle
+  is disabled in that case since it's already the default for free. The
+  moment a second profile is added, auto-default stops and picking one
+  goes back to manual (the star toggle), matching how it worked before
+  this fix except now the solo case no longer requires manually
+  starring the one profile you have.
+
+* Sat Aug 15 2026 Mehmet Bayoglu - 0.1.24-1
+- Named profiles: add a default-profile star toggle next to the profile
+  dropdown. Marking a profile default makes Lynapse start up already
+  showing/using it (EQ, ANC, THX, everything) and pushes it to the
+  device via the existing resync path, instead of always coming up on
+  the raw last-used settings with no profile selected.
+
+* Fri Aug 14 2026 Mehmet Bayoglu - 0.1.23-1
+- THX Spatial Audio: fixed a silent HRIR channel-index wraparound (the
+  IR file in use had fewer channels than the convolver graph assumed,
+  so both ears were being convolved with the front-left response
+  instead of front-left/front-right)
+- THX Spatial Audio: fixed a race between the toggle-off sweep and the
+  live-sync poll's stray-stream sweep that made turning THX off
+  audibly dip and bounce back up
+- THX Spatial Audio: reduced makeup gain (4.8 -> 3.17, ~+7.6dB net ->
+  ~+4.3dB net) after confirmed clipping on loud broadband content
+
 * Thu Aug 13 2026 Mehmet Bayoglu - 0.1.22-1
 - Tray's right-click "About" now opens the same Gtk.AboutDialog the
   main window's About button shows, instead of just opening GitHub in

@@ -26,7 +26,21 @@ Supports all four PIDs:
 
 ## Install
 
+### Quick install / update (any distro)
+
+One command, safe to paste anywhere and re-run any time — clones and installs if you
+don't have it yet, or pulls the latest and reinstalls if you do (same directory each
+time):
+
+```sh
+if [ -d Blackshark-v3pro-guitray ]; then cd Blackshark-v3pro-guitray && git pull; else git clone https://github.com/Stealthee/Blackshark-v3pro-guitray.git && cd Blackshark-v3pro-guitray; fi && ./install.sh
+```
+
+Append `--user` to install to `~/.local` instead of system-wide (no sudo needed).
+
 ### Universal (any distro)
+
+The same thing spelled out as separate steps, if you'd rather:
 
 ```sh
 git clone https://github.com/Stealthee/Blackshark-v3pro-guitray.git
@@ -80,6 +94,9 @@ To actually install the update, from inside your cloned directory:
 ./bsupdate.sh           # same install mode as install.sh (sudo, /usr/local)
 ./bsupdate.sh --user    # if you installed with --user
 ```
+
+(This is equivalent to just re-running the [Quick install / update](#quick-install--update-any-distro)
+one-liner above from the same directory.)
 
 This pulls the latest source, reinstalls, and restarts lynapse if it's
 currently running.

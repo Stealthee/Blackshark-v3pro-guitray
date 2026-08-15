@@ -6,18 +6,27 @@ pkgdesc="Lynapse — GTK4 control panel for the Razer BlackShark V3 (openrazer r
 arch=('any')
 url="https://github.com/Stealthee/Blackshark-v3pro-guitray"
 license=('GPL2')
+# NOTE: stock openrazer-driver-dkms (extra/) doesn't support the V3 Pro yet —
+# that needs mehmetbayoglu/openrazer branch blackshark-v3-pro until the
+# upstream PR lands (see README). Depends on the package name, not the fork,
+# since AUR can't express "this branch of this package".
 depends=('python' 'python-gobject' 'gtk4' 'openrazer-driver-dkms')
 makedepends=('python-build' 'python-installer' 'python-setuptools' 'python-wheel')
+# GitHub names the tarball's top-level directory after the repo, not
+# pkgname — it unpacks to "Blackshark-v3pro-guitray-$pkgver", not
+# "lynapse-$pkgver", hence _srcdir below rather than the more usual
+# "cd $pkgname-$pkgver".
+_srcdir="Blackshark-v3pro-guitray-$pkgver"
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('4d626ef1b641732515cd69d451c36a758b65ffc1f00ddf7cef2b43f33182531d')
 
 build() {
-    cd "$pkgname-$pkgver"
+    cd "$_srcdir"
     python -m build --wheel --no-isolation
 }
 
 package() {
-    cd "$pkgname-$pkgver"
+    cd "$_srcdir"
     python -m installer --destdir="$pkgdir" dist/*.whl
     install -Dm644 data/lynapse.desktop "$pkgdir/usr/share/applications/lynapse.desktop"
     install -Dm644 data/lynapse.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/lynapse.svg"

@@ -637,14 +637,17 @@ class LynapseWindow(Gtk.ApplicationWindow):
         self._mic_target_idx = _int('mic_eq_preset', 0)
         self._fn_mode        = _int('audio_fn_button', 1)
 
-        # A default profile (if set — see the profile switcher below)
-        # overrides every value just seeded above, so Lynapse starts up
-        # already showing/using that profile instead of the raw last-used
-        # cache. _resync_all_settings (scheduled further down) then pushes
-        # these to the device exactly like it already does for the plain
-        # cached case — no separate device-write path needed.
-        if self._default_profile and self._default_profile in self._profiles:
-            prof = self._profiles[self._default_profile]
+        # The effective default profile (explicitly starred, or — with
+        # nothing starred — the sole profile if that's all there is; see
+        # _effective_default_profile) overrides every value just seeded
+        # above, so Lynapse starts up already showing/using it instead of
+        # the raw last-used cache. _resync_all_settings (scheduled further
+        # down) then pushes these to the device exactly like it already
+        # does for the plain cached case — no separate device-write path
+        # needed.
+        effective_default = self._effective_default_profile()
+        if effective_default:
+            prof = self._profiles[effective_default]
             self._eq_target_profile = prof.get('eq_target_profile', self._eq_target_profile)
             if 'eq_custom' in prof:
                 self._eq_custom = {int(k): v for k, v in prof['eq_custom'].items()}
@@ -878,8 +881,6 @@ class LynapseWindow(Gtk.ApplicationWindow):
         self._default_toggle_switching = False
         self._default_btn = Gtk.ToggleButton(label='☆')
         self._default_btn.add_css_class('tv-btn')
-        self._default_btn.set_tooltip_text(
-            'Set the selected profile as default — auto-applied every time Lynapse starts')
         self._default_btn.connect('toggled', self._on_toggle_default)
         self._sync_default_btn()
         box.append(self._default_btn)
@@ -898,32 +899,53 @@ class LynapseWindow(Gtk.ApplicationWindow):
 
         return box
 
+    def _effective_default_profile(self):
+        """Which profile counts as default right now: the explicitly
+        starred one (default_profile in lynapse.json) if it's still valid,
+        otherwise — only while there's exactly one profile saved — that
+        lone profile auto-counts, since there's nothing to disambiguate.
+        The moment a second profile exists this stops; from then on
+        default is only ever the explicitly-starred one (or None)."""
+        if self._default_profile in self._profiles:
+            return self._default_profile
+        if len(self._profiles) == 1:
+            return next(iter(self._profiles))
+        return None
+
     def _populate_profile_combo(self, select=None):
-        """(Re)fill the combo's rows, marking the default profile with a
-        star. `select`: which id to leave active afterward — None defaults
-        to the default profile if one's set and still valid (the startup
+        """(Re)fill the combo's rows, marking the effective default profile
+        with a star. `select`: which id to leave active afterward — None
+        defaults to the effective default if there is one (the startup
         case), else the blank placeholder."""
+        effective_default = self._effective_default_profile()
         if select is None:
-            select = self._default_profile if self._default_profile in self._profiles else ''
+            select = effective_default or ''
         self._profile_combo.remove_all()
         self._profile_combo.append('', '— profile —')
         for name in sorted(self._profiles):
-            label = f'★ {name}' if name == self._default_profile else name
+            label = f'★ {name}' if name == effective_default else name
             self._profile_combo.append(name, label)
         self._profile_switching = True
         self._profile_combo.set_active_id(select)
         self._profile_switching = False
 
     def _sync_default_btn(self):
-        """Reflect whether the currently-selected profile is the default in
-        the star toggle's pressed state and glyph, without re-firing its own
-        handler."""
+        """Reflect whether the currently-selected profile is the (effective)
+        default in the star toggle's pressed state and glyph, without
+        re-firing its own handler. Disabled while there's only one profile
+        — nothing to choose between yet, it's already the default for
+        free (see _effective_default_profile)."""
         name = self._profile_combo.get_active_id()
-        is_default = bool(name) and name == self._default_profile
+        solo = len(self._profiles) <= 1
+        is_default = bool(name) and name == self._effective_default_profile()
         self._default_toggle_switching = True
         self._default_btn.set_active(is_default)
         self._default_btn.set_label('★' if is_default else '☆')
-        self._default_btn.set_sensitive(bool(name))
+        self._default_btn.set_sensitive(bool(name) and not solo)
+        self._default_btn.set_tooltip_text(
+            "Automatically the default while it's your only profile"
+            if solo else
+            'Set the selected profile as default — auto-applied every time Lynapse starts')
         self._default_toggle_switching = False
 
     def _on_toggle_default(self, btn):

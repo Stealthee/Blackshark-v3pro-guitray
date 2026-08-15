@@ -1,3 +1,12 @@
+lynapse (0.1.25-1) unstable; urgency=medium
+
+  * Default profile: auto-select/apply the sole saved profile as default
+    with no manual starring needed, but only while it's the only one --
+    the moment a second profile is added, picking a default goes back to
+    manual via the star toggle.
+
+ -- Mehmet Bayoglu <noreply@example.com>  Sat, 15 Aug 2026 14:00:00 -0500
+
 lynapse (0.1.24-1) unstable; urgency=medium
 
   * Named profiles: add a default-profile star toggle next to the profile

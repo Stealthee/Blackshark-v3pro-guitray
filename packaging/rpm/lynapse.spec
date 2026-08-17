@@ -1,5 +1,5 @@
 Name:           lynapse
-Version:        0.1.27
+Version:        0.1.30
 Release:        1%{?dist}
 Summary:        Lynapse — GTK4 control panel for the Razer BlackShark V3 headset
 
@@ -45,6 +45,47 @@ install -Dm644 data/lynapse.svg %{buildroot}%{_datadir}/icons/hicolor/scalable/a
 %{_datadir}/icons/hicolor/scalable/apps/lynapse.svg
 
 %changelog
+* Mon Aug 17 2026 Mehmet Bayoglu - 0.1.30-1
+- Window is now resizable (was fixed at 900x620), with a 700x400 floor.
+  Size is remembered across restarts (~/.config/lynapse.json), saved on
+  the actual app-quit path (tray Quit), since closing the window only
+  hides it to tray.
+- Every tab's content now scrolls (vertical only) instead of clipping —
+  the Mic tab in particular had grown past the old fixed window height
+  with Mic Monitor and Indicator LED added this cycle.
+
+* Mon Aug 17 2026 Mehmet Bayoglu - 0.1.29-1
+- New: Mic Monitor on the Mic tab — software loopback (PipeWire
+  module-loopback) so you can hear your own mic live through your
+  headphones while testing mic EQ presets/bands. Unlike hardware
+  Sidetone, which taps the mic before the on-device EQ stage on this
+  headset and so sounds identical no matter what EQ preset is active,
+  this routes through PipeWire from the same digital capture the EQ
+  actually affects — confirmed by direct recording. Kept at a low
+  latency_msec to stay clear of Delayed Auditory Feedback (hearing your
+  own delayed voice disrupts speech). Toggle + 0-100% volume slider,
+  state persists across restarts.
+
+* Mon Aug 17 2026 Mehmet Bayoglu - 0.1.28-1
+- Mic EQ presets: the actual cause of "switching presets sounds like
+  nothing changed" was a paired openrazer-blackshark driver bug — the
+  preset-select/band-write commands were sent on HID class 0x16/0x17,
+  which the device treats as read-only status queries and silently
+  no-ops. Fixed in the driver to use 0x96/0x97, confirmed against a
+  fresh Windows Synapse capture (ground-truth audio A/B test +
+  checksum-verified protocol re-capture). Requires the paired driver
+  update to take effect.
+- Mic EQ presets: also fix Esports/MicBoost curves being swapped (device
+  preset codes 0x20-0x23 don't match Synapse's on-screen button order,
+  which is what threw off the original table), and replace the
+  hand-guessed all-zero Default curve with its real factory values.
+  Decoded byte-for-byte, CRC-verified, from a Windows Synapse capture.
+  Secondary correctness fix on top of the driver bug above.
+- New: Indicator LED mode on the Power tab (2.4GHz dongle only) — choose
+  Connection Status, Battery Status, or Battery Warning Only, matching
+  Synapse. Requires the paired openrazer-blackshark driver update (new
+  indicator_led sysfs attribute).
+
 * Sat Aug 15 2026 Mehmet Bayoglu - 0.1.27-1
 - Named profiles: add a delete button (trash icon, next to Save/+),
   with a confirmation dialog. Clears the deleted profile as default

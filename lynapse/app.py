@@ -29,6 +29,7 @@ def _pump_main_loop():
 from lynapse._tray import BatteryTray as _BatteryTray, REORDERABLE_ITEMS
 from lynapse import _update_check
 from lynapse import _thx
+from lynapse import _mic_monitor
 
 SYSFS_DIR = '/sys/bus/hid/drivers/razerkraken'
 PIDS = ('0576', '0577', '057A', '0579')   # V3 Pro wired, V3 Pro 2.4GHz, V3 wireless dongle, V3 wired
@@ -47,6 +48,7 @@ DEVICE_CAPS = {
         'power_save': 'wireless_power_save',
         'battery': 'charge_level',    # 0..255 byte, scale /255*100 for %
         'charging': 'charge_status',
+        'indicator_led': 'indicator_led',   # dongle-only, 0=ConnStatus 1=BattStatus 2=WarningOnly
         'anc': None,
         'mic_eq': 'mic_eq',
         'mic_eq_preset': 'mic_eq_preset',
@@ -70,6 +72,7 @@ DEVICE_CAPS = {
         'power_save': 'v3pro_power_save',
         'battery': 'charge_level',          # 0..255 byte, scale /255*100 for %
         'charging': 'charge_status',
+        'indicator_led': 'indicator_led',   # dongle-only, 0=ConnStatus 1=BattStatus 2=WarningOnly
         'anc': 'v3pro_anc',
         'mic_eq': 'mic_eq',           # shared with V3 — same 0x97 protocol
         'mic_eq_preset': 'mic_eq_preset',
@@ -88,6 +91,7 @@ DEVICE_CAPS['0579'].update({
     'name': 'BlackShark V3 (Wired)',
     'ull': None,
     'power_save': None,
+    'indicator_led': None,
 })
 # V3 Pro wired: same as V3 Pro wireless minus power_save/ULL (those need the
 # wireless link). Battery is still present — the headset is just charging
@@ -97,6 +101,7 @@ DEVICE_CAPS['0576'].update({
     'name': 'BlackShark V3 Pro (Wired)',
     'power_save': None,
     'ull': None,
+    'indicator_led': None,
 })
 
 EQ_FREQS = ['31Hz','63Hz','125Hz','250Hz','500Hz','1kHz','2kHz','4kHz','8kHz','16kHz']
@@ -110,13 +115,19 @@ EQ_PRESETS = {
 }
 PRESET_IDX = {'Default': 0, 'Game': 1, 'Movie': 2, 'Music': 3, 'Esports': 4}
 
-MIC_EQ_PRESETS = ['Default', 'Esports', 'Broadcast', 'MicBoost']
-# Synthetic factory values (Synapse doesn't send mic EQ band data with preset cmds)
+MIC_EQ_PRESETS = ['Default', 'MicBoost', 'Broadcast', 'Esports']
+# Real factory curves, decoded byte-for-byte (incl. CRC) from a Windows
+# Synapse capture clicking Default->Esports->Broadcast->Flat->Default
+# (2026-08-16, /run/media/joe/WinBlows/Mic Caps/defaultesportsbroadcastflat.pcapng).
+# Device preset codes (buf[13] = 0x20 + idx) are Default=0x20, MicBoost=0x21,
+# Broadcast=0x22, Esports=0x23 — NOT the same order Synapse displays its
+# buttons in, which is what caused the old table to swap MicBoost/Esports'
+# curves and left Default hand-guessed at all-zero (flat, which it isn't).
 MIC_EQ_PRESET_BANDS = {
-    'Default':   [ 0,  0,  0,  0,  0,  0,  0,  0,  0,  0],
-    'Esports':   [-3, -3, -1, -1,  0,  0,  3,  4,  2,  1],
+    'Default':   [-5, -4, -4, -3, -2,  1,  2,  3,  3,  3],
+    'MicBoost':  [-3, -3, -1, -1,  0,  0,  3,  4,  2,  1],
     'Broadcast': [-4,  1,  2,  0, -1,  0,  2,  3,  2, -1],
-    'MicBoost':  [ 2,  2,  3,  4,  4,  4,  4,  3,  2,  2],
+    'Esports':   [ 2,  2,  3,  4,  4,  4,  4,  3,  2,  2],
 }
 MIC_EQ_FACTORY = {i: list(v) for i, (_, v) in enumerate(MIC_EQ_PRESET_BANDS.items())}
 # Factory (Razer built-in) values per profile slot
@@ -158,6 +169,26 @@ def load_mic_eq_config():
 def save_mic_eq_config(mic_eq_custom):
     data = _read_config()
     data['mic_eq_custom'] = {str(k): v for k, v in mic_eq_custom.items()}
+    _write_config(data)
+
+def load_mic_monitor_config():
+    data = _read_config()
+    return bool(data.get('mic_monitor_on', False)), int(data.get('mic_monitor_vol', 50))
+
+def save_mic_monitor_config(on, vol):
+    data = _read_config()
+    data['mic_monitor_on'] = bool(on)
+    data['mic_monitor_vol'] = int(vol)
+    _write_config(data)
+
+def load_window_size():
+    data = _read_config()
+    return int(data.get('window_w', 900)), int(data.get('window_h', 620))
+
+def save_window_size(w, h):
+    data = _read_config()
+    data['window_w'] = int(w)
+    data['window_h'] = int(h)
     _write_config(data)
 
 def load_profiles():
@@ -580,8 +611,10 @@ def _window_title():
 class LynapseWindow(Gtk.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title=_window_title())
-        self.set_default_size(900, 620)
-        self.set_resizable(False)
+        win_w, win_h = load_window_size()
+        self.set_default_size(win_w, win_h)
+        self.set_size_request(700, 400)  # floor — cards start clipping below this
+        self.set_resizable(True)
         self.set_icon_name('lynapse')
 
         self._device = Device.detect()
@@ -591,6 +624,7 @@ class LynapseWindow(Gtk.ApplicationWindow):
         self._eq_apply_timer = None
         self._eq_custom = load_eq_config()
         self._mic_eq_custom = load_mic_eq_config()
+        self._mic_monitor_on, self._mic_monitor_vol = load_mic_monitor_config()
         self._profiles = load_profiles()
         self._default_profile = load_default_profile()
         self._profile_switching = False
@@ -636,6 +670,7 @@ class LynapseWindow(Gtk.ApplicationWindow):
         self._sidetone_level = _int('sidetone', 0)
         self._mic_target_idx = _int('mic_eq_preset', 0)
         self._fn_mode        = _int('audio_fn_button', 1)
+        self._indicator_led  = _int('indicator_led', 0)
 
         # The effective default profile (explicitly starred, or — with
         # nothing starred — the sole profile if that's all there is; see
@@ -664,6 +699,7 @@ class LynapseWindow(Gtk.ApplicationWindow):
             self._sidetone_level  = prof.get('sidetone_level',  self._sidetone_level)
             self._fn_mode         = prof.get('fn_mode',         self._fn_mode)
             self._pwr_timeout     = prof.get('pwr_timeout',     self._pwr_timeout)
+            self._indicator_led   = prof.get('indicator_led',   self._indicator_led)
 
         # When True, a widget is being updated programmatically to mirror an
         # on-board (headset button/dial) change — its own change handler must
@@ -678,10 +714,20 @@ class LynapseWindow(Gtk.ApplicationWindow):
         nb.set_tab_pos(Gtk.PositionType.TOP)
         self.set_child(nb)
 
-        nb.append_page(self._build_sound_tab(), Gtk.Label(label='SOUND'))
-        nb.append_page(self._build_enhancement_tab(), Gtk.Label(label='ENHANCEMENT'))
-        nb.append_page(self._build_mic_tab(), Gtk.Label(label='MIC'))
-        nb.append_page(self._build_power_tab(), Gtk.Label(label='POWER'))
+        # Each tab's content can now run taller than the fixed 900x620
+        # window (Mic tab especially, after Mic Monitor/Indicator LED etc.
+        # piled on) — wrap every tab in a scrolled window (vertical only,
+        # right-edge scrollbar) rather than clipping or growing the window.
+        def _scrolled(widget):
+            sw = Gtk.ScrolledWindow()
+            sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+            sw.set_child(widget)
+            return sw
+
+        nb.append_page(_scrolled(self._build_sound_tab()), Gtk.Label(label='SOUND'))
+        nb.append_page(_scrolled(self._build_enhancement_tab()), Gtk.Label(label='ENHANCEMENT'))
+        nb.append_page(_scrolled(self._build_mic_tab()), Gtk.Label(label='MIC'))
+        nb.append_page(_scrolled(self._build_power_tab()), Gtk.Label(label='POWER'))
 
         # Battery indicator parked at the right end of the tab row (V3 Pro only).
         self._bat_widget = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -725,6 +771,20 @@ class LynapseWindow(Gtk.ApplicationWindow):
         GLib.timeout_add(700, self._live_sync)
         # Check GitHub for a newer release; surfaces as a tray menu item.
         GLib.timeout_add(3000, self._check_for_update)
+        # Restore the mic monitor loopback if it was on last session — pure
+        # PipeWire state, doesn't survive a Lynapse restart on its own.
+        # Threaded: a few `pactl` round-trips, cheap but no reason to block
+        # the GUI thread on them.
+        if self._mic_monitor_on:
+            GLib.timeout_add(2000, self._restore_mic_monitor)
+
+    def _restore_mic_monitor(self):
+        def _worker():
+            ok, err = _mic_monitor.enable(volume_pct=self._mic_monitor_vol)
+            if not ok:
+                _log(f'mic monitor restore failed: {err}')
+        threading.Thread(target=_worker, daemon=True).start()
+        return False
 
     def _check_for_update(self):
         def _worker():
@@ -836,6 +896,8 @@ class LynapseWindow(Gtk.ApplicationWindow):
                 self._write_sync('power_save', str(self._pwr_timeout))
             if self._has('audio_fn_button'):
                 self._write_sync('audio_fn_button', str(self._fn_mode))
+            if self._has('indicator_led'):
+                self._write_sync('indicator_led', str(self._indicator_led))
 
             if on_done:
                 GLib.idle_add(on_done, True, None)
@@ -995,6 +1057,7 @@ class LynapseWindow(Gtk.ApplicationWindow):
             'sidetone_level': getattr(self, '_sidetone_level', 0),
             'fn_mode': getattr(self, '_fn_mode', 1),
             'pwr_timeout': getattr(self, '_pwr_timeout', 30),
+            'indicator_led': getattr(self, '_indicator_led', 0),
         }
 
     def _apply_profile(self, name):
@@ -1037,6 +1100,8 @@ class LynapseWindow(Gtk.ApplicationWindow):
             self._tray_set_fn_mode(prof.get('fn_mode', 1))
         if self._has('power_save'):
             self._tray_set_pwr_timeout(prof.get('pwr_timeout', 30))
+        if self._has('indicator_led'):
+            self._tray_set_indicator_led(prof.get('indicator_led', 0))
 
         self._status_label.set_text(f"Profile '{name}' applied")
 
@@ -2094,7 +2159,7 @@ class LynapseWindow(Gtk.ApplicationWindow):
         # Sidetone slider (0-15)
         st_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         st_card.add_css_class('card')
-        st_lbl = Gtk.Label(label='SIDE TONE  (mic monitoring 0–15)')
+        st_lbl = Gtk.Label(label='SIDE TONE  (hardware mic monitoring 0–15)')
         st_lbl.add_css_class('section-label')
         st_lbl.set_halign(Gtk.Align.START)
         st_card.append(st_lbl)
@@ -2110,6 +2175,56 @@ class LynapseWindow(Gtk.ApplicationWindow):
         st_row.append(st_lbl0); st_row.append(self._sidetone_slider); st_row.append(st_lbl15)
         st_card.append(st_row)
         outer.append(st_card)
+
+        # Mic Monitor — software loopback via PipeWire (hear your own EQ'd
+        # mic live). Distinct from Sidetone above: Sidetone taps the mic
+        # signal *before* the on-device mic EQ stage on this headset
+        # (confirmed 2026-08-17 — switching mic EQ presets makes zero
+        # audible difference through Sidetone even though it's a large,
+        # measured, real change downstream), so it's useless for actually
+        # hearing what an EQ/preset change sounds like. This routes through
+        # PipeWire instead, from the same digital capture the EQ audibly
+        # affects — at the cost of a little software latency Sidetone
+        # doesn't have (kept low via a small `latency_msec`, see
+        # _mic_monitor.py, to stay well clear of Delayed Auditory Feedback —
+        # hearing your own voice with a lag disrupts speech).
+        mm_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        mm_card.add_css_class('card')
+        mm_lbl = Gtk.Label(label='MIC MONITOR  (software loopback, reflects mic EQ)')
+        mm_lbl.add_css_class('section-label')
+        mm_lbl.set_halign(Gtk.Align.START)
+        mm_card.append(mm_lbl)
+        mm_desc = Gtk.Label(label="Hear your own mic live through your headphones — unlike Sidetone\n"
+                                   "above, this actually reflects mic EQ/preset changes. Headphones\n"
+                                   "only — with speakers this will feed back.")
+        mm_desc.set_halign(Gtk.Align.START); mm_desc.set_xalign(0)
+        mm_card.append(mm_desc)
+
+        mm_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self._mm_btn = Gtk.Button(label='ON' if self._mic_monitor_on else 'OFF')
+        self._mm_btn.add_css_class('toggle-on' if self._mic_monitor_on else 'toggle-off')
+        self._mm_btn.set_halign(Gtk.Align.START)
+        self._mm_btn.connect('clicked', self._on_mic_monitor_toggle)
+        mm_row.append(self._mm_btn)
+        mm_card.append(mm_row)
+
+        mm_vol_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        mm_vol_lbl0 = Gtk.Label(label='0%'); mm_vol_lbl0.add_css_class('db-label')
+        mm_vol_adj = Gtk.Adjustment(value=self._mic_monitor_vol, lower=0, upper=100, step_increment=5, page_increment=10)
+        self._mm_vol_slider = Gtk.Scale(orientation=Gtk.Orientation.HORIZONTAL, adjustment=mm_vol_adj)
+        self._mm_vol_slider.set_hexpand(True)
+        self._mm_vol_slider.set_draw_value(True)
+        self._mm_vol_slider.set_digits(0)
+        self._mm_vol_slider.connect('value-changed', self._on_mic_monitor_vol)
+        mm_vol_lbl100 = Gtk.Label(label='100%'); mm_vol_lbl100.add_css_class('db-label')
+        mm_vol_row.append(mm_vol_lbl0); mm_vol_row.append(self._mm_vol_slider); mm_vol_row.append(mm_vol_lbl100)
+        mm_card.append(mm_vol_row)
+
+        self._mm_status_lbl = Gtk.Label(label='')
+        self._mm_status_lbl.set_halign(Gtk.Align.START); self._mm_status_lbl.set_xalign(0)
+        self._mm_status_lbl.add_css_class('freq-label')
+        mm_card.append(self._mm_status_lbl)
+        outer.append(mm_card)
 
         # Mic EQ presets — V3 only (V3 Pro driver doesn't expose mic EQ yet)
         self._mic_preset_btns = {}
@@ -2252,6 +2367,51 @@ class LynapseWindow(Gtk.ApplicationWindow):
         self._write('sidetone', str(val))
         self._update_tray_state()
 
+    def _on_mic_monitor_toggle(self, btn):
+        self._set_mic_monitor(not self._mic_monitor_on)
+
+    def _set_mic_monitor(self, on):
+        """Threaded — `pactl load-module`/`unload-module` are fast but are
+        still subprocess round-trips, no reason to block the GUI thread."""
+        if hasattr(self, '_mm_btn'):
+            self._mm_btn.set_sensitive(False)
+
+        def _worker():
+            if on:
+                ok, err = _mic_monitor.enable(volume_pct=self._mic_monitor_vol)
+            else:
+                ok, err = _mic_monitor.disable()
+            GLib.idle_add(self._on_mic_monitor_result, on, ok, err)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_mic_monitor_result(self, on, ok, err):
+        if hasattr(self, '_mm_btn'):
+            self._mm_btn.set_sensitive(True)
+        if not ok:
+            if hasattr(self, '_mm_status_lbl'):
+                self._mm_status_lbl.set_text(f'Mic monitor: {err}')
+            return False
+        self._mic_monitor_on = on
+        save_mic_monitor_config(self._mic_monitor_on, self._mic_monitor_vol)
+        if hasattr(self, '_mm_btn'):
+            self._mm_btn.set_label('ON' if on else 'OFF')
+            self._mm_btn.remove_css_class('toggle-off' if on else 'toggle-on')
+            self._mm_btn.add_css_class('toggle-on' if on else 'toggle-off')
+        if hasattr(self, '_mm_status_lbl'):
+            self._mm_status_lbl.set_text(
+                'Live — talk and listen through your headphones.' if on else '')
+        return False
+
+    def _on_mic_monitor_vol(self, sl):
+        if self._syncing:
+            return
+        val = int(round(sl.get_value()))
+        self._mic_monitor_vol = val
+        if self._mic_monitor_on:
+            _mic_monitor.set_volume(val)
+        save_mic_monitor_config(self._mic_monitor_on, val)
+
     def _load_mic_sliders(self, vals):
         self._mic_ignore_slider = True
         for i, sl in enumerate(self._mic_eq_sliders):
@@ -2263,11 +2423,16 @@ class LynapseWindow(Gtk.ApplicationWindow):
     def _apply_mic_eq(self, idx=None):
         if idx is None:
             idx = self._mic_target_idx
+        # Select the preset slot BEFORE sending the band gains, not after —
+        # confirmed against a real Windows Synapse capture (2026-08-16),
+        # which always writes mic_eq_preset then mic_eq bands, never the
+        # reverse. Doing it after would risk the slot-select recalling that
+        # slot's own stored curve and clobbering what we just sent.
+        self._write('mic_eq_preset', str(idx))
         ok, _err = self._write('mic_eq', ' '.join(str(v) for v in self._mic_eq_values))
         if ok:
             self._mic_eq_custom[idx] = list(self._mic_eq_values)
             save_mic_eq_config(self._mic_eq_custom)
-        self._write('mic_eq_preset', str(idx))
 
     def _on_mic_preset(self, btn, idx):
         for b in self._mic_preset_btns.values():
@@ -2358,22 +2523,39 @@ class LynapseWindow(Gtk.ApplicationWindow):
             wired_note.add_css_class('card')
             left.append(wired_note)
 
-        # right: LED indicator (informational only)
+        # right: LED indicator (dongle only)
         right = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         hbox.append(right)
 
-        led_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
-        led_card.add_css_class('card')
-        led_card.set_size_request(300, -1)
-        led_lbl = Gtk.Label(label='LED INDICATOR')
-        led_lbl.add_css_class('section-label')
-        led_lbl.set_halign(Gtk.Align.START)
-        led_card.append(led_lbl)
-        led_note = Gtk.Label(label='LED indicator mode (dongle) and other\npower commands not yet decoded.')
-        led_note.set_halign(Gtk.Align.START)
-        led_note.set_xalign(0)
-        led_card.append(led_note)
-        right.append(led_card)
+        self._led_btns = {}
+        if self._has('indicator_led'):
+            led_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+            led_card.add_css_class('card')
+            led_card.set_size_request(300, -1)
+            led_lbl = Gtk.Label(label='INDICATOR LED')
+            led_lbl.add_css_class('section-label')
+            led_lbl.set_halign(Gtk.Align.START)
+            led_card.append(led_lbl)
+            led_desc = Gtk.Label(label='Select what the indicator LED on\nthe dongle will display:')
+            led_desc.set_halign(Gtk.Align.START)
+            led_desc.set_xalign(0)
+            led_card.append(led_desc)
+
+            for i, label in [(0, 'Connection Status'), (1, 'Battery Status'), (2, 'Battery Warning Only')]:
+                btn = Gtk.Button(label=label)
+                btn.add_css_class('pwr-btn')
+                btn.set_halign(Gtk.Align.START)
+                if i == self._indicator_led:
+                    btn.add_css_class('active')
+                btn.connect('clicked', self._on_indicator_led, i)
+                led_card.append(btn)
+                self._led_btns[i] = btn
+            right.append(led_card)
+        else:
+            led_note = Gtk.Label(label='LED indicator mode is only available\nwith the 2.4 GHz dongle.')
+            led_note.set_halign(Gtk.Align.START); led_note.set_xalign(0)
+            led_note.add_css_class('card')
+            right.append(led_note)
 
         return outer
 
@@ -2411,14 +2593,32 @@ class LynapseWindow(Gtk.ApplicationWindow):
         self._write('power_save', str(t))
         self._update_tray_state()
 
+    def _tray_set_indicator_led(self, mode):
+        self._indicator_led = mode
+        self._write('indicator_led', str(mode))
+        if hasattr(self, '_led_btns'):
+            for lb in self._led_btns.values():
+                lb.remove_css_class('active')
+            if mode in self._led_btns:
+                self._led_btns[mode].add_css_class('active')
+
+    def _on_indicator_led(self, btn, mode):
+        for lb in self._led_btns.values():
+            lb.remove_css_class('active')
+        btn.add_css_class('active')
+        self._indicator_led = mode
+        self._write('indicator_led', str(mode))
+
 
 class App(Gtk.Application):
     def __init__(self):
         super().__init__(application_id='com.lynapse.app')
+        self._win = None
 
     def do_activate(self):
         _install_app_icon()
         win = LynapseWindow(self)
+        self._win = win
 
         provider = Gtk.CssProvider()
         provider.load_from_data(CSS)
@@ -2427,6 +2627,19 @@ class App(Gtk.Application):
             provider,
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
+
+    def do_shutdown(self):
+        # The window normally just hides to tray (see _on_close_request) —
+        # the only real exit path is tray Quit, which calls app.quit()
+        # straight through to here, bypassing close-request entirely. This
+        # is the one place that reliably fires on every actual exit, so
+        # it's where the resized window size gets persisted.
+        if self._win is not None:
+            try:
+                save_window_size(self._win.get_width(), self._win.get_height())
+            except Exception as e:
+                _log(f'window size save failed: {e}')
+        Gtk.Application.do_shutdown(self)
 
 
 def main():
